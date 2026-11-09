@@ -24,7 +24,8 @@ DEFAULTS = {
     "chat_histories": {},
     "selected_character": None,
     "generated_character": None,
-    "pending_chat": None
+    "navigation": "Create",
+    "confirm_delete_id": None
 }
 
 for key, value in DEFAULTS.items():
@@ -33,18 +34,17 @@ for key, value in DEFAULTS.items():
 
 
 # =====================================================
-# CUSTOM CSS
+# DESIGN
 # =====================================================
 
 st.markdown("""
 <style>
-
 .stApp {
     background:
-        radial-gradient(circle at 15% 10%, #30205c 0%, transparent 35%),
-        radial-gradient(circle at 85% 80%, #172c60 0%, transparent 35%),
+        radial-gradient(circle at 12% 8%, #30205c 0%, transparent 35%),
+        radial-gradient(circle at 90% 85%, #172c60 0%, transparent 35%),
         linear-gradient(135deg, #090d1c, #15132e, #211747);
-    color: white;
+    color: #ffffff;
 }
 
 #MainMenu, footer, header {
@@ -52,73 +52,95 @@ st.markdown("""
 }
 
 .block-container {
-    max-width: 1250px;
-    padding-top: 2rem;
-    padding-bottom: 3rem;
+    max-width: 1150px;
+    padding-top: 1.8rem;
+    padding-bottom: 2.5rem;
 }
 
-h1, h2, h3, h4 {
-    color: white !important;
+h1, h2, h3 {
+    color: #ffffff !important;
 }
 
 p, label {
-    color: #e5e7eb;
+    color: #e2e4f0;
+}
+
+[data-testid="stSidebar"] {
+    background: #101127;
+    border-right: 1px solid rgba(255,255,255,.08);
 }
 
 .hero {
-    padding: 40px 25px;
+    padding: 27px 25px;
+    border-radius: 22px;
     text-align: center;
-    border-radius: 25px;
+    margin-bottom: 28px;
     background: linear-gradient(
         120deg,
         rgba(124,58,237,.28),
         rgba(37,99,235,.20)
     );
-    border: 1px solid rgba(255,255,255,.15);
-    margin-bottom: 30px;
-    box-shadow: 0 15px 45px rgba(0,0,0,.2);
+    border: 1px solid rgba(255,255,255,.13);
 }
 
 .hero h1 {
-    font-size: 43px;
+    font-size: 38px;
     font-weight: 850;
-    margin-bottom: 8px;
+    margin: 0;
+    letter-spacing: -1px;
 }
 
 .hero p {
     color: #c4b5fd;
-    font-size: 17px;
+    font-size: 14px;
+    margin: 7px 0 0;
+}
+
+.section-title {
+    font-size: 23px;
+    font-weight: 750;
+    margin-bottom: 5px;
 }
 
 .character-card {
+    padding: 20px;
+    border-radius: 17px;
     background: linear-gradient(
         135deg,
-        rgba(124,58,237,.20),
-        rgba(37,99,235,.13)
+        rgba(124,58,237,.19),
+        rgba(37,99,235,.12)
     );
     border: 1px solid rgba(167,139,250,.25);
-    border-radius: 20px;
-    padding: 22px;
-    margin: 12px 0;
+    margin: 12px 0 20px;
+}
+
+.character-meta {
+    color: #c4b5fd;
+    font-size: 13px;
+    line-height: 1.9;
 }
 
 .stTextInput input,
 .stNumberInput input,
 .stTextArea textarea {
-    background-color: #17172e !important;
+    background: #17172e !important;
     color: white !important;
-    border-radius: 12px !important;
+    border-radius: 11px !important;
+}
+
+div[data-baseweb="select"] {
+    background: #17172e;
+    border-radius: 11px;
 }
 
 .stButton button,
 .stFormSubmitButton button {
-    border-radius: 12px;
-    min-height: 45px;
+    border-radius: 11px;
+    min-height: 43px;
     font-weight: 650;
-    border: 1px solid rgba(255,255,255,.15);
+    border: 1px solid rgba(255,255,255,.12);
     background: linear-gradient(90deg,#7c3aed,#4f46e5);
     color: white;
-    transition: .2s;
 }
 
 .stButton button:hover,
@@ -127,28 +149,21 @@ p, label {
     background: linear-gradient(90deg,#6d28d9,#4338ca);
 }
 
-[data-testid="stSidebar"] {
-    background: #111127;
-}
-
 [data-testid="stChatMessage"] {
     border: 1px solid rgba(255,255,255,.08);
-    border-radius: 15px;
+    border-radius: 14px;
+    background: rgba(255,255,255,.035);
 }
 
-div[data-baseweb="select"] {
-    background: #17172e;
-    border-radius: 12px;
+div[data-testid="stForm"] {
+    background: rgba(255,255,255,.025);
+    padding: 20px;
+    border: 1px solid rgba(255,255,255,.09);
+    border-radius: 18px;
 }
 
 hr {
-    border-color: rgba(255,255,255,.15);
-}
-
-.small-note {
-    color: #a5b4fc;
-    font-size: 13px;
-    text-align: center;
+    border-color: rgba(255,255,255,.12);
 }
 
 </style>
@@ -156,22 +171,15 @@ hr {
 
 
 # =====================================================
-# OLLAMA CLOUD CONNECTION
+# OLLAMA CLOUD
 # =====================================================
 
 def get_ollama_client():
 
-    try:
-        api_key = st.secrets.get("OLLAMA_API_KEY", "")
-
-    except Exception:
-        api_key = ""
+    api_key = st.secrets.get("OLLAMA_API_KEY", "")
 
     if not api_key:
-        raise ValueError(
-            "OLLAMA_API_KEY is missing. "
-            "Add your API key in Streamlit Cloud Settings > Secrets."
-        )
+        raise ValueError("OLLAMA_API_KEY is missing.")
 
     return Client(
         host="https://ollama.com",
@@ -194,66 +202,33 @@ def get_ai_response(model, messages):
     return response.message.content
 
 
-# =====================================================
-# ERROR HANDLING
-# =====================================================
-
 def show_error(error):
 
-    message = str(error)
-    lower = message.lower()
+    message = str(error).lower()
 
-    if "api_key" in lower or "missing" in lower:
+    if "401" in message or "unauthorized" in message:
+        st.error("Ollama authentication failed. Check your API key.")
 
-        st.error(
-            "🔑 Ollama API key is missing. "
-            "Check your Streamlit Secrets configuration."
-        )
+    elif "403" in message or "forbidden" in message:
+        st.error("Access denied. Check your Ollama account and model access.")
 
-    elif "401" in lower or "unauthorized" in lower:
+    elif "404" in message or "not found" in message:
+        st.error("The selected Ollama model could not be found.")
 
-        st.error(
-            "🔒 API authentication failed. "
-            "Check your Ollama API key."
-        )
+    elif "429" in message or "rate limit" in message:
+        st.error("Usage limit reached. Please try again later.")
 
-    elif "403" in lower or "forbidden" in lower:
+    elif "timeout" in message or "connection" in message:
+        st.error("Unable to connect to Ollama Cloud. Please try again.")
 
-        st.error(
-            "⛔ Access denied. Check your Ollama account access "
-            "and model availability."
-        )
-
-    elif "404" in lower or "not found" in lower:
-
-        st.error(
-            "❌ Model not found. Check the model name "
-            "in the sidebar."
-        )
-
-    elif "429" in lower or "rate limit" in lower:
-
-        st.error(
-            "⏳ API usage limit reached. Please try again later."
-        )
-
-    elif any(word in lower for word in [
-        "connection",
-        "connect",
-        "timeout"
-    ]):
-
-        st.error(
-            "🌐 Unable to connect to Ollama Cloud. "
-            "Please check your internet connection."
-        )
+    elif "api_key" in message or "missing" in message:
+        st.error("Ollama API key is missing. Check Streamlit Secrets.")
 
     else:
+        st.error("Something went wrong while contacting the AI service.")
 
-        st.error("Something went wrong.")
-
-        with st.expander("Technical error details"):
-            st.code(message)
+        with st.expander("Technical details"):
+            st.code(str(error))
 
 
 # =====================================================
@@ -263,12 +238,11 @@ def show_error(error):
 def generate_character(details, model):
 
     prompt = f"""
-You are a professional fictional character designer.
+You are a creative fictional character designer.
 
-Create an original, detailed and interesting fictional character.
+Create an original and engaging fictional character.
 
 CHARACTER DETAILS:
-
 Name: {details['name']}
 Age: {details['age']}
 Occupation: {details['occupation']}
@@ -276,41 +250,39 @@ Personality: {details['personality']}
 Superpower: {details['power']}
 Genre: {details['genre']}
 
-Create a beautiful character profile using these sections:
+Write the character profile using these sections:
 
-# 🎭 Character Introduction
-Introduce the character.
+## Character Introduction
+A short and interesting introduction.
 
-# 🧠 Personality
-Describe their behaviour, habits and personality.
+## Personality
+Describe their personality and behaviour.
 
-# 📖 Backstory
-Create an interesting fictional history.
+## Backstory
+Create an engaging fictional background.
 
-# 💪 Strengths
-Describe their strongest qualities.
+## Strengths and Weaknesses
+Describe both their strengths and limitations.
 
-# 🌙 Weaknesses
-Give the character believable limitations.
-
-# 🎯 Goals and Motivation
+## Goals and Motivation
 Explain what they want to achieve.
 
-# ✨ Special Abilities
+## Special Abilities
 Describe their abilities and limitations.
 
-# ⚔️ Enemy or Rival
+## Rival
 Create an interesting fictional rival.
 
-# 💬 Famous Dialogue
-Write one original memorable dialogue.
+## Famous Dialogue
+Write one original memorable line.
 
 IMPORTANT:
-- Respect all the details provided by the user.
-- Make the character original.
-- Keep the story engaging.
+- Keep the character original.
+- Respect the supplied details.
+- Do not change the character's name or power.
+- Keep content age-appropriate.
 - Avoid graphic violence.
-- Do not change the character's name or superpower.
+- Make the profile interesting but not unnecessarily long.
 """
 
     return get_ai_response(
@@ -326,44 +298,33 @@ IMPORTANT:
 def chat_with_character(character, history, user_message, model):
 
     system_prompt = f"""
-You are roleplaying as a fictional character.
+You are roleplaying as the fictional character below.
 
-CHARACTER NAME: {character['name']}
+NAME: {character['name']}
 AGE: {character['age']}
 OCCUPATION: {character['occupation']}
 PERSONALITY: {character['personality']}
 SUPERPOWER: {character['power']}
 WORLD: {character['genre']}
 
-CHARACTER BACKGROUND:
-
+CHARACTER PROFILE:
 {character['profile']}
 
-YOUR ROLE:
-
-1. Speak in this character's voice.
-2. Maintain personality consistency.
-3. Remember the character's fictional background.
-4. Keep the conversation natural and engaging.
-5. Do not randomly change abilities or history.
-6. Respond directly to the user's messages.
-7. Use expressions or short actions when appropriate.
-8. Keep responses reasonably concise.
-9. Keep the conversation friendly and age-appropriate.
-10. Do not claim to be a real person.
-
-You are playing a fictional role.
+RULES:
+- Speak naturally in this character's voice.
+- Stay consistent with the character's personality.
+- Remember the fictional background.
+- Do not randomly change abilities or history.
+- Keep replies reasonably concise.
+- Keep the conversation friendly and age-appropriate.
+- You are playing a fictional role, not a real person.
 """
 
     messages = [
-        {
-            "role": "system",
-            "content": system_prompt
-        }
+        {"role": "system", "content": system_prompt}
     ]
 
-    # Include recent conversation for context
-    messages.extend(history[-20:])
+    messages.extend(history[-16:])
 
     messages.append({
         "role": "user",
@@ -374,74 +335,74 @@ You are playing a fictional role.
 
 
 # =====================================================
+# NAVIGATION
+# =====================================================
+
+def open_character_chat(character_id):
+
+    st.session_state.selected_character = character_id
+    st.session_state.navigation = "Chat"
+
+
+def delete_character(character_id):
+
+    st.session_state.characters = [
+        c for c in st.session_state.characters
+        if c["id"] != character_id
+    ]
+
+    st.session_state.chat_histories.pop(character_id, None)
+
+    if st.session_state.selected_character == character_id:
+        st.session_state.selected_character = None
+
+    if st.session_state.generated_character == character_id:
+        st.session_state.generated_character = None
+
+    st.session_state.confirm_delete_id = None
+
+
+# =====================================================
 # SIDEBAR
 # =====================================================
 
-st.sidebar.markdown("## 🎭 AI Character Studio")
+st.sidebar.markdown("## 🎭 Character Studio")
 
-st.sidebar.caption("Create • Imagine • Interact")
-
-st.sidebar.markdown("---")
-
-model = st.sidebar.text_input(
-    "AI Cloud Model",
-    value="gemma4:31b",
-    help="Ollama Cloud API model name."
-).strip()
-
-if not model:
-    model = "gemma4:31b"
-
-st.sidebar.markdown("### Navigation")
-
-page = st.sidebar.radio(
-    "Choose a section",
-    [
-        "✨ Create Character",
-        "📚 My Characters",
-        "💬 Character Chat"
-    ],
+st.sidebar.radio(
+    "Navigation",
+    ["Create", "Gallery", "Chat"],
+    key="navigation",
     label_visibility="collapsed"
 )
 
 st.sidebar.markdown("---")
 
-st.sidebar.markdown(
-    f"### 🎭 {len(st.session_state.characters)} Characters"
-)
+# Keep model setting simple and out of the main interface.
+model = st.secrets.get("OLLAMA_MODEL", "gemma4:31b").strip()
 
-st.sidebar.caption("AI powered by Ollama Cloud")
+if not model:
+    model = "gemma4:31b"
 
 
 # =====================================================
-# HERO
+# MAIN HEADER
 # =====================================================
 
 st.markdown("""
 <div class="hero">
-
-<h1>🎭 AI CHARACTER STUDIO</h1>
-
-<p>
-Create fictional worlds, design unforgettable characters
-and bring them to life through AI conversations.
-</p>
-
+    <h1>🎭 AI Character Studio</h1>
+    <p>Imagine a character. Create their story. Bring them to life.</p>
 </div>
 """, unsafe_allow_html=True)
 
 
 # =====================================================
-# PAGE 1: CREATE CHARACTER
+# PAGE 1: CREATE
 # =====================================================
 
-if page == "✨ Create Character":
+if st.session_state.navigation == "Create":
 
-    st.markdown("## ✨ Create Your Character")
-
-    st.write(
-        "Give your imagination a name, personality and special abilities."
-    )
+    st.markdown("## ✨ Create a Character")
 
     with st.form("character_creation_form"):
 
@@ -451,11 +412,11 @@ if page == "✨ Create Character":
 
             name = st.text_input(
                 "Character Name",
-                placeholder="Example: Aria Storm"
+                placeholder="e.g. Aria Storm"
             )
 
             age = st.number_input(
-                "Character Age",
+                "Age",
                 min_value=1,
                 max_value=150,
                 value=21
@@ -463,19 +424,19 @@ if page == "✨ Create Character":
 
             occupation = st.text_input(
                 "Occupation",
-                placeholder="Warrior, Detective, Wizard..."
+                placeholder="Detective, Wizard, Explorer..."
             )
 
         with col2:
 
             personality = st.text_input(
                 "Personality",
-                placeholder="Brave, intelligent, mysterious..."
+                placeholder="Brave, funny, intelligent..."
             )
 
             power = st.text_input(
-                "Superpower",
-                placeholder="Fire, Ice, Teleportation..."
+                "Special Ability",
+                placeholder="Teleportation, Ice, Healing..."
             )
 
             genre = st.selectbox(
@@ -485,18 +446,16 @@ if page == "✨ Create Character":
                     "Sci-Fi",
                     "Superhero",
                     "Mystery",
-                    "Horror",
                     "Adventure",
                     "Anime",
                     "Magical World",
+                    "Horror",
                     "Post-Apocalyptic"
                 ]
             )
 
-        st.markdown("---")
-
         generate = st.form_submit_button(
-            "✨ Generate My Character",
+            "✨ Create Character",
             use_container_width=True
         )
 
@@ -508,8 +467,7 @@ if page == "✨ Create Character":
             personality.strip(),
             power.strip()
         ]):
-
-            st.warning("⚠️ Please complete all character details.")
+            st.warning("Please fill in all character details.")
 
         else:
 
@@ -524,9 +482,7 @@ if page == "✨ Create Character":
 
             try:
 
-                with st.spinner(
-                    "🤖 AI is creating your character..."
-                ):
+                with st.spinner("Creating your character..."):
 
                     profile = generate_character(details, model)
 
@@ -537,101 +493,94 @@ if page == "✨ Create Character":
                 }
 
                 st.session_state.characters.append(character)
-
                 st.session_state.chat_histories[character["id"]] = []
-
                 st.session_state.selected_character = character["id"]
-
                 st.session_state.generated_character = character["id"]
-
-                st.success("🎉 Your character has been created!")
 
                 st.rerun()
 
             except Exception as error:
-
                 show_error(error)
 
-    # Display latest character
+    # Show the most recently created character
 
     character_id = st.session_state.generated_character
 
-    if character_id:
+    character = next(
+        (
+            c for c in st.session_state.characters
+            if c["id"] == character_id
+        ),
+        None
+    )
 
-        character = next(
-            (
-                c for c in st.session_state.characters
-                if c["id"] == character_id
-            ),
-            None
+    if character:
+
+        st.markdown("---")
+
+        st.markdown(f"## 🎭 {character['name']}")
+
+        st.markdown(
+            f"""
+            <div class="character-card">
+                <div class="character-meta">
+                    <b>Age:</b> {character['age']}
+                    &nbsp; · &nbsp;
+                    <b>Occupation:</b> {html.escape(character['occupation'])}
+                    <br>
+                    <b>Personality:</b> {html.escape(character['personality'])}
+                    <br>
+                    <b>Ability:</b> {html.escape(character['power'])}
+                    &nbsp; · &nbsp;
+                    <b>World:</b> {html.escape(character['genre'])}
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True
         )
 
-        if character:
+        st.markdown(character["profile"])
 
-            st.markdown("---")
-
-            st.markdown(f"## 🎭 {character['name']}")
-
-            st.markdown(
-                f"""
-                <div class="character-card">
-
-                <b>Age:</b> {character['age']}<br>
-                <b>Occupation:</b> {html.escape(character['occupation'])}<br>
-                <b>Personality:</b> {html.escape(character['personality'])}<br>
-                <b>Power:</b> {html.escape(character['power'])}<br>
-                <b>Genre:</b> {html.escape(character['genre'])}
-
-                </div>
-                """,
-                unsafe_allow_html=True
-            )
-
-            st.markdown("### 📖 Character Profile")
-
-            st.markdown(character["profile"])
-
-            if st.button(
-                "💬 Chat With This Character",
-                use_container_width=True
-            ):
-
-                st.session_state.selected_character = character["id"]
-
-                st.session_state.pending_chat = character["id"]
-
-                st.rerun()
+        st.button(
+            "💬 Chat with Character",
+            use_container_width=True,
+            on_click=open_character_chat,
+            args=(character["id"],)
+        )
 
 
 # =====================================================
-# PAGE 2: CHARACTER GALLERY
+# PAGE 2: GALLERY
 # =====================================================
 
-elif page == "📚 My Characters":
+elif st.session_state.navigation == "Gallery":
 
-    st.markdown("## 📚 My Character Gallery")
+    st.markdown("## 📚 My Characters")
 
     characters = st.session_state.characters
 
     if not characters:
 
-        st.info(
-            "You haven't created any characters yet. "
-            "Visit Create Character to get started!"
-        )
+        st.info("Your character gallery is empty.")
+
+        if st.button("✨ Create Your First Character"):
+            st.session_state.navigation = "Create"
+            st.rerun()
 
     else:
 
         selected_id = st.selectbox(
-            "Select your character",
+            "Select Character",
             options=[c["id"] for c in characters],
+            index=0,
             format_func=lambda cid: next(
                 c["name"] for c in characters if c["id"] == cid
             )
         )
 
         character = next(
-            c for c in characters if c["id"] == selected_id
+            c for c in characters
+            if c["id"] == selected_id
         )
 
         st.markdown("---")
@@ -641,37 +590,34 @@ elif page == "📚 My Characters":
         st.markdown(
             f"""
             <div class="character-card">
-
-            <h3>Character Information</h3>
-
-            <b>Age:</b> {character['age']}<br>
-            <b>Occupation:</b> {html.escape(character['occupation'])}<br>
-            <b>Personality:</b> {html.escape(character['personality'])}<br>
-            <b>Superpower:</b> {html.escape(character['power'])}<br>
-            <b>World:</b> {html.escape(character['genre'])}
-
+                <div class="character-meta">
+                    <b>Age:</b> {character['age']}
+                    &nbsp; · &nbsp;
+                    <b>Occupation:</b> {html.escape(character['occupation'])}
+                    <br>
+                    <b>Personality:</b> {html.escape(character['personality'])}
+                    <br>
+                    <b>Ability:</b> {html.escape(character['power'])}
+                    &nbsp; · &nbsp;
+                    <b>World:</b> {html.escape(character['genre'])}
+                </div>
             </div>
             """,
             unsafe_allow_html=True
         )
 
-        st.markdown("### 📖 Character Story")
-
         st.markdown(character["profile"])
-
-        st.markdown("---")
 
         col1, col2, col3 = st.columns(3)
 
         with col1:
 
-            if st.button("💬 Chat", use_container_width=True):
-
-                st.session_state.selected_character = selected_id
-
-                st.session_state.pending_chat = selected_id
-
-                st.rerun()
+            st.button(
+                "💬 Chat",
+                use_container_width=True,
+                on_click=open_character_chat,
+                args=(selected_id,)
+            )
 
         with col2:
 
@@ -691,78 +637,71 @@ elif page == "📚 My Characters":
 
                 try:
 
-                    with st.spinner(
-                        "🤖 Creating a new character story..."
-                    ):
+                    with st.spinner("Creating a new story..."):
 
                         new_profile = generate_character(details, model)
 
                     character["profile"] = new_profile
 
-                    st.session_state.chat_histories[selected_id] = []
-
-                    st.success("New character profile generated!")
-
                     st.rerun()
 
                 except Exception as error:
-
                     show_error(error)
 
         with col3:
 
             if st.button("🗑️ Delete", use_container_width=True):
-
-                st.session_state.characters = [
-                    c for c in characters
-                    if c["id"] != selected_id
-                ]
-
-                st.session_state.chat_histories.pop(
-                    selected_id, None
-                )
-
-                if st.session_state.selected_character == selected_id:
-                    st.session_state.selected_character = None
-
-                if st.session_state.generated_character == selected_id:
-                    st.session_state.generated_character = None
-
-                st.success("Character deleted!")
-
+                st.session_state.confirm_delete_id = selected_id
                 st.rerun()
 
+        if st.session_state.confirm_delete_id == selected_id:
+
+            st.warning(f"Delete {character['name']} permanently from this session?")
+
+            yes, no = st.columns(2)
+
+            with yes:
+
+                if st.button("Confirm Delete", type="primary", use_container_width=True):
+                    delete_character(selected_id)
+                    st.rerun()
+
+            with no:
+
+                if st.button("Cancel", use_container_width=True):
+                    st.session_state.confirm_delete_id = None
+                    st.rerun()
+
 
 # =====================================================
-# PAGE 3: CHAT WITH CHARACTER
+# PAGE 3: CHAT
 # =====================================================
 
-elif page == "💬 Character Chat":
+elif st.session_state.navigation == "Chat":
 
-    st.markdown("## 💬 Talk With Your Character")
+    st.markdown("## 💬 Character Chat")
 
     characters = st.session_state.characters
 
     if not characters:
 
-        st.warning(
-            "Create a character first before starting a conversation."
-        )
+        st.info("Create a character before starting a conversation.")
+
+        if st.button("✨ Create Character"):
+            st.session_state.navigation = "Create"
+            st.rerun()
 
     else:
 
         character_ids = [c["id"] for c in characters]
 
-        current_id = st.session_state.pending_chat
-
-        if current_id not in character_ids:
-            current_id = st.session_state.selected_character
+        current_id = st.session_state.selected_character
 
         if current_id not in character_ids:
             current_id = character_ids[0]
 
         selected_id = st.selectbox(
-            "Choose your character",
+            "Chat with",
             options=character_ids,
             index=character_ids.index(current_id),
             format_func=lambda cid: next(
@@ -771,10 +710,10 @@ elif page == "💬 Character Chat":
         )
 
         st.session_state.selected_character = selected_id
-        st.session_state.pending_chat = None
 
         character = next(
-            c for c in characters if c["id"] == selected_id
+            c for c in characters
+            if c["id"] == selected_id
         )
 
         history = st.session_state.chat_histories.setdefault(
@@ -784,57 +723,38 @@ elif page == "💬 Character Chat":
         st.markdown(
             f"""
             <div class="character-card">
-
-            <h3>🎭 {html.escape(character['name'])}</h3>
-
-            <b>{html.escape(character['occupation'])}</b><br>
-
-            {html.escape(character['personality'])}<br><br>
-
-            <b>Special Power:</b>
-            {html.escape(character['power'])}
-
+                <h3>🎭 {html.escape(character['name'])}</h3>
+                <div class="character-meta">
+                    {html.escape(character['occupation'])}
+                    &nbsp; · &nbsp;
+                    {html.escape(character['genre'])}
+                </div>
             </div>
             """,
             unsafe_allow_html=True
         )
 
-        st.markdown("---")
-
-        col1, col2 = st.columns([3, 1])
+        col1, col2 = st.columns([4, 1])
 
         with col1:
-            st.markdown("### 💭 Conversation")
+            st.markdown("### Conversation")
 
         with col2:
 
-            if st.button("🧹 Clear Chat", use_container_width=True):
-
+            if st.button("Clear Chat", use_container_width=True):
                 st.session_state.chat_histories[selected_id] = []
-
                 st.rerun()
-
-        # Display previous conversation
 
         if not history:
 
-            st.info(
-                f"Start a conversation with {character['name']}!"
-            )
-
-            st.markdown(
-                "**Try saying:** Hello! Tell me about your world."
-            )
+            st.caption(f"Start a conversation with {character['name']}.")
 
         else:
 
             for message in history:
 
                 with st.chat_message(message["role"]):
-
                     st.markdown(message["content"])
-
-        # Chat input
 
         user_message = st.chat_input(
             f"Message {character['name']}..."
@@ -844,9 +764,7 @@ elif page == "💬 Character Chat":
 
             try:
 
-                with st.spinner(
-                    f"🎭 {character['name']} is thinking..."
-                ):
+                with st.spinner(f"{character['name']} is thinking..."):
 
                     reply = chat_with_character(
                         character,
@@ -868,28 +786,4 @@ elif page == "💬 Character Chat":
                 st.rerun()
 
             except Exception as error:
-
                 show_error(error)
-
-
-# =====================================================
-# FOOTER
-# =====================================================
-
-st.markdown("---")
-
-st.markdown("""
-<div class="small-note">
-
-🎭 <b>AI Character Studio</b>
-
-<br><br>
-
-Create • Imagine • Interact
-
-<br>
-
-Powered by Ollama Cloud & Streamlit
-
-</div>
-""", unsafe_allow_html=True)
