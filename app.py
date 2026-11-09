@@ -3,9 +3,12 @@ from ollama import Client
 import uuid
 import html
 import random
+import json
+import re
+from datetime import datetime
 
 # =========================================================
-# THE UNKNOWN - AI CHARACTER UNIVERSE
+# THE UNKNOWN - AI CHARACTER UNIVERSE  (v3)
 # =========================================================
 st.set_page_config(
     page_title="THE UNKNOWN | Character Universe",
@@ -15,9 +18,9 @@ st.set_page_config(
 )
 
 # ---------- Languages ----------
-# None = auto-detect: the character answers in whatever language/script the user writes in.
+AUTO_LANGUAGE = "🌐 Auto (match my language)"
 LANGUAGES = {
-    "🌐 Auto (match my language)": None,
+    AUTO_LANGUAGE: None,
     "English": "English",
     "हिन्दी (Hindi - Devanagari)": "Hindi written in Devanagari script",
     "Hinglish (Hindi in English letters)": "Hinglish (Hindi written in Roman/English letters)",
@@ -36,7 +39,6 @@ LANGUAGES = {
     "한국어": "Korean",
     "中文": "Simplified Chinese",
 }
-AUTO_LANGUAGE = "🌐 Auto (match my language)"
 
 
 def language_rule(auto_hint="the user's latest message"):
@@ -45,40 +47,17 @@ def language_rule(auto_hint="the user's latest message"):
         return f"LANGUAGE: Always reply in {forced}, no matter which language the user writes in."
     return (
         f"LANGUAGE: Always reply in the same language AND script as {auto_hint}. "
-        "If it is Hindi in Devanagari, reply in Devanagari. "
-        "If it is Hindi written in English letters (Hinglish), reply in Hinglish with English letters. "
-        "If it is English, reply in English. Do the same for any other language. "
-        "If the user switches language during the chat, switch immediately. "
-        "If the message is too short to tell (like 'ok' or an emoji), keep the language used earlier in the conversation. "
-        "Only the language changes: the character's personality, humour and style stay the same."
+        "Hindi in Devanagari -> Devanagari. Hindi in English letters (Hinglish) -> Hinglish in English letters. "
+        "English -> English. Same for every other language. "
+        "If the user switches language, switch immediately. If the message is too short to tell, keep the earlier language. "
+        "Only the language changes; personality, humour and style stay the same."
     )
 
 
-# ---------- Session state ----------
-DEFAULTS = {
-    "custom_characters": [],
-    "chat_histories": {},
-    "selected_character": None,
-    "navigation": "Discover",
-    "pending_prompt": None,
-    "mystery_answered": False,
-    "mystery_attempts": 0,
-    "visited_characters": [],
-    "reply_language": AUTO_LANGUAGE,
-    "daily_id": None,
-}
-for key, value in DEFAULTS.items():
-    if key not in st.session_state:
-        st.session_state[key] = value.copy() if isinstance(value, (list, dict)) else value
-
-# ---------- Ready-made characters ----------
+# ---------- Data ----------
 PRESET_CHARACTERS = [
     {
-        "id": "zayn",
-        "name": "Zayn",
-        "emoji": "🕶️",
-        "role": "The Mysterious Stranger",
-        "genre": "Mystery",
+        "id": "zayn", "name": "Zayn", "emoji": "🕶️", "role": "The Mysterious Stranger", "genre": "Mystery",
         "vibe": "Secretive • Clever • Unpredictable",
         "intro": "He appears wherever a mystery begins. He claims he knows the ending, but refuses to explain how.",
         "personality": "calm, witty, cryptic, observant, playful and clever",
@@ -88,11 +67,7 @@ PRESET_CHARACTERS = [
         "color": "#8b5cf6",
     },
     {
-        "id": "boo",
-        "name": "Boo",
-        "emoji": "👻",
-        "role": "The Dramatic Ghost",
-        "genre": "Comedy",
+        "id": "boo", "name": "Boo", "emoji": "👻", "role": "The Dramatic Ghost", "genre": "Comedy",
         "vibe": "Funny • Dramatic • Soft-hearted",
         "intro": "A ghost with big feelings, terrible timing and absolutely no talent for haunting.",
         "personality": "dramatic, funny, expressive, kind, easily distracted and theatrical",
@@ -102,11 +77,7 @@ PRESET_CHARACTERS = [
         "color": "#38bdf8",
     },
     {
-        "id": "mira",
-        "name": "Mira",
-        "emoji": "🕵️‍♀️",
-        "role": "The Secret Detective",
-        "genre": "Detective",
+        "id": "mira", "name": "Mira", "emoji": "🕵️‍♀️", "role": "The Secret Detective", "genre": "Detective",
         "vibe": "Smart • Curious • Sharp",
         "intro": "A detective who notices the tiny details everyone else misses. She treats every conversation like a case.",
         "personality": "intelligent, curious, logical, confident, observant and lightly sarcastic",
@@ -116,11 +87,7 @@ PRESET_CHARACTERS = [
         "color": "#f59e0b",
     },
     {
-        "id": "pixel",
-        "name": "Pixel",
-        "emoji": "🦊",
-        "role": "The Chaos Creator",
-        "genre": "Fantasy Comedy",
+        "id": "pixel", "name": "Pixel", "emoji": "🦊", "role": "The Chaos Creator", "genre": "Fantasy Comedy",
         "vibe": "Mischievous • Energetic • Random",
         "intro": "A tiny fox-like trickster who has a plan for everything. Whether the plan makes sense is another matter.",
         "personality": "mischievous, energetic, funny, imaginative, chaotic but friendly",
@@ -130,11 +97,7 @@ PRESET_CHARACTERS = [
         "color": "#fb923c",
     },
     {
-        "id": "nyra",
-        "name": "Nyra",
-        "emoji": "🌙",
-        "role": "The Dream Keeper",
-        "genre": "Fantasy",
+        "id": "nyra", "name": "Nyra", "emoji": "🌙", "role": "The Dream Keeper", "genre": "Fantasy",
         "vibe": "Gentle • Magical • Wise",
         "intro": "A traveller between dream worlds who collects forgotten wishes and turns them into stories.",
         "personality": "gentle, thoughtful, imaginative, mysterious, warm and poetic",
@@ -144,12 +107,8 @@ PRESET_CHARACTERS = [
         "color": "#ec4899",
     },
     {
-        "id": "professor-chaos",
-        "name": "Professor Chaos",
-        "emoji": "🧪",
-        "role": "The Unreliable Inventor",
-        "genre": "Sci-Fi Comedy",
-        "vibe": "Brilliant-ish • Weird • Enthusiastic",
+        "id": "professor-chaos", "name": "Professor Chaos", "emoji": "🧪", "role": "The Unreliable Inventor",
+        "genre": "Sci-Fi Comedy", "vibe": "Brilliant-ish • Weird • Enthusiastic",
         "intro": "An inventor whose inventions work perfectly, provided you ignore the smoke, the noise and the occasional dancing.",
         "personality": "eccentric, enthusiastic, clever, absent-minded, funny and dramatic",
         "secret": "The professor's greatest invention is a machine that finds missing socks. It only finds left socks.",
@@ -159,7 +118,122 @@ PRESET_CHARACTERS = [
     },
 ]
 
+MOODS = ["Surprise me", "Extra funny", "Mysterious", "Friendly", "Curious / interview mode"]
+UNIVERSES = ["Fantasy", "Mystery", "Sci-Fi", "Adventure", "Comedy", "Superhero", "Magical World"]
+EMOJIS = ["🪄", "🧙", "🦸", "🤖", "🐉", "🧛", "🧚", "🦄", "🐺", "🦉", "👽", "🏴‍☠️", "🥷", "🎭", "🔮", "🌟", "🐙", "🦋"]
+IDEAS = [
+    {"name": "Captain Nimbus", "role": "Cloud pirate", "personality": "bold, boastful, secretly shy", "ability": "Sails on storm clouds", "genre": "Adventure"},
+    {"name": "Dr. Whisker", "role": "Cat psychologist", "personality": "calm, sarcastic, very judgemental", "ability": "Understands every animal", "genre": "Comedy"},
+    {"name": "Luna Vex", "role": "Time-travelling baker", "personality": "cheerful, forgetful, dramatic", "ability": "Bakes bread that rewinds time", "genre": "Sci-Fi"},
+    {"name": "Kairo", "role": "Shadow courier", "personality": "quiet, loyal, dry humour", "ability": "Walks through shadows", "genre": "Mystery"},
+    {"name": "Aarav Spark", "role": "Lightning-powered student", "personality": "curious, impatient, kind", "ability": "Controls electricity (not very well)", "genre": "Superhero"},
+]
+BOND = [(0, "Stranger", "🌱"), (2, "Acquaintance", "🌿"), (5, "Friend", "🌸"), (10, "Confidant", "💜"), (20, "Soulmate", "✨")]
 
+ACHIEVEMENTS = {
+    "first_hello": ("👋", "First Hello", "Send your first message to a character."),
+    "social": ("🦋", "Social Butterfly", "Meet 3 different characters."),
+    "chatterbox": ("💬", "Chatterbox", "Have 15 conversations in total."),
+    "secret_seeker": ("🗝️", "Secret Seeker", "Reach 4 exchanges with one character."),
+    "creator": ("🪄", "Creator", "Create your own character."),
+    "collector": ("❤️", "Collector", "Add 3 favourites."),
+    "director": ("🎬", "Director", "Stage a Crossover scene."),
+    "polyglot": ("🌍", "Polyglot", "Choose a specific reply language."),
+    "detective": ("🔍", "Rookie Detective", "Solve your first case."),
+    "master_detective": ("🏆", "Master Detective", "Solve every case."),
+}
+
+CASES = [
+    {
+        "id": "cupcake", "title": "The Vanishing Cupcake", "emoji": "🧁", "level": "Easy",
+        "story": "At exactly 4 PM, the last cupcake disappeared from the kitchen. It had been raining all afternoon.",
+        "clues": [
+            "The culprit had purple icing on their sleeve.",
+            "The culprit claimed to be in the garden, but their shoes were completely dry.",
+            "The culprit was holding a plate and insisting they had already eaten.",
+        ],
+        "suspects": {
+            "Zayn": {"emoji": "🕶️", "statement": "“I was in the garden, watering the roses.”",
+                     "evidence": "Shoes soaked and muddy. Black coat, spotless.", "guilty": False,
+                     "truth": "You really were in the rain. You know nothing about the cupcake, but you noticed the professor carrying a plate."},
+            "Boo": {"emoji": "👻", "statement": "“I was in the library, practising my haunting.”",
+                    "evidence": "Wears a plain white sheet. No sleeves, no shoes.", "guilty": False,
+                    "truth": "You were in the library all afternoon, and you are very dramatic about it. You did not take the cupcake."},
+            "Professor Chaos": {"emoji": "🧪", "statement": "“I was in the garden, measuring the rain. Scientifically.”",
+                                "evidence": "Shoes perfectly dry. Purple smear on the lab-coat sleeve. Holding an empty plate.", "guilty": True,
+                                "truth": "You took the cupcake for an 'experiment' and ate it. You were never in the garden."},
+        },
+        "hint": "Only one suspect has an alibi that does not match their shoes.",
+        "solution": "Professor Chaos claimed to be in the rain, yet had dry shoes, purple icing on his sleeve and an empty plate. The 'experiment' was delicious.",
+    },
+    {
+        "id": "pancakes", "title": "The Midnight Pancake Raid", "emoji": "🥞", "level": "Medium",
+        "story": "Nyra's tower of pancakes vanished at midnight. The kitchen window was open and the fridge door was left ajar.",
+        "clues": [
+            "A sticky syrup handprint was left on the fridge handle.",
+            "A pigeon had been sitting on the open window all night.",
+            "The toaster was found turned to face the wall, as if it had won something.",
+        ],
+        "suspects": {
+            "Boo": {"emoji": "👻", "statement": "“I floated through the wall to check on the noise!”",
+                    "evidence": "Completely see-through. Hands pass through everything.", "guilty": False,
+                    "truth": "You cannot touch objects, so you could not have opened a fridge. You only watched, horrified."},
+            "Zayn": {"emoji": "🕶️", "statement": "“I never enter a room through a window. Ever.”",
+                     "evidence": "Pale and sweating when the window is mentioned.", "guilty": False,
+                     "truth": "You avoid that window because of the pigeon. You will never admit this."},
+            "Pixel": {"emoji": "🦊", "statement": "“Pancakes? Never heard of them. I was asleep. Probably.”",
+                      "evidence": "Syrup on the tail. Looks proud and slightly embarrassed.", "guilty": True,
+                      "truth": "You took the pancakes and also beat the toaster in a staring contest, finally."},
+        },
+        "hint": "A ghost can't leave a handprint, and someone is far too scared of pigeons to use that window.",
+        "solution": "Boo can't touch things, Zayn would never go near a pigeon, and the toaster staring contest was pure Pixel.",
+    },
+    {
+        "id": "lab", "title": "The Locked Laboratory", "emoji": "🔬", "level": "Hard",
+        "story": "The Professor's Sock-Finder 3000 vanished from his locked laboratory. The lock shows no damage and nothing else was touched.",
+        "clues": [
+            "The thief knew how the trick lock worked, which needs prior inspection.",
+            "Sandwich crumbs were found at the scene.",
+            "All fingerprints had been wiped away perfectly.",
+        ],
+        "suspects": {
+            "Nyra": {"emoji": "🌙", "statement": "“I was asleep. Three dream creatures can confirm it.”",
+                     "evidence": "Has never visited the lab. Sleepy and peaceful.", "guilty": False,
+                     "truth": "You were genuinely dreaming about pancakes. You have no idea about the lab."},
+            "Pixel": {"emoji": "🦊", "statement": "“I was busy beating a toaster at staring contests.”",
+                      "evidence": "Has the toaster as a witness (it did not blink).", "guilty": False,
+                      "truth": "You were at your staring contest. Locks bore you, and you don't own a sandwich."},
+            "Mira": {"emoji": "🕵️‍♀️", "statement": "“I was following another lead entirely.”",
+                     "evidence": "Inspected the lab door earlier this week 'for a case'. A suspicious crumb on her coat.", "guilty": True,
+                     "truth": "You took the invention to prove a security point and ate a sandwich on the way. Be sharp and slightly sarcastic, but never confess."},
+        },
+        "hint": "Who would know the lock, wipe prints perfectly and also have a weakness for sandwiches?",
+        "solution": "Mira inspected the lock, wiped the prints like a pro, and dropped sandwich crumbs, her one weakness.",
+    },
+]
+CASE_BY_ID = {c["id"]: c for c in CASES}
+
+CC_DEFAULTS = {
+    "cc_name": "", "cc_role": "", "cc_personality": "", "cc_ability": "", "cc_concept": "",
+    "cc_age": 22, "cc_genre": "Fantasy", "cc_emoji": "🪄", "cc_color": "#8b5cf6",
+}
+DEFAULTS = {
+    "custom_characters": [], "chat_histories": {}, "selected_character": None, "navigation": "Discover",
+    "pending_prompt": None, "pending_regen": None, "visited_characters": [], "favorites": [],
+    "achievements": [], "reply_language": AUTO_LANGUAGE, "used_language": False, "daily_id": None,
+    "solved_cases": {}, "case_attempts": {}, "interrogations": {}, "notes": {}, "ask_pending": None,
+    "case_pick": "cupcake", "scene": None, "scenes_made": 0, "scene_topic": "",
+    **CC_DEFAULTS,
+}
+for key, value in DEFAULTS.items():
+    if key not in st.session_state:
+        st.session_state[key] = value.copy() if isinstance(value, (list, dict)) else value
+
+SAVE_KEYS = ["custom_characters", "chat_histories", "visited_characters", "favorites", "achievements",
+             "solved_cases", "case_attempts", "interrogations", "notes", "scenes_made", "used_language"]
+
+
+# ---------- Helpers ----------
 def all_characters():
     return PRESET_CHARACTERS + st.session_state.custom_characters
 
@@ -172,6 +246,135 @@ def ensure_history(character_id):
     return st.session_state.chat_histories.setdefault(character_id, [])
 
 
+def safe_color(value, default="#8b5cf6"):
+    return value if isinstance(value, str) and re.fullmatch(r"#[0-9a-fA-F]{6}", value) else default
+
+
+def esc(value):
+    return html.escape(str(value if value is not None else ""))
+
+
+def total_chats():
+    return sum(len(v) // 2 for v in st.session_state.chat_histories.values())
+
+
+def bond_level(count):
+    level = max(i for i, (t, _, _) in enumerate(BOND) if count >= t)
+    cur = BOND[level][0]
+    nxt = BOND[level + 1][0] if level + 1 < len(BOND) else None
+    progress = 1.0 if nxt is None else (count - cur) / (nxt - cur)
+    return BOND[level], nxt, progress
+
+
+def notice(kind, text):
+    icons = {"info": "💡", "success": "🎉", "warning": "🧐", "error": "⛔"}
+    st.markdown(
+        f'<div class="notice {kind}"><div class="ni">{icons.get(kind, "💡")}</div><div>{esc(text)}</div></div>',
+        unsafe_allow_html=True,
+    )
+
+
+def toggle_fav(cid):
+    favs = st.session_state.favorites
+    if cid in favs:
+        favs.remove(cid)
+    else:
+        favs.append(cid)
+
+
+def go_to_chat(character_id):
+    st.session_state.selected_character = character_id
+    st.session_state.navigation = "Chat"
+
+
+def go_to_page(page):
+    st.session_state.navigation = page
+
+
+def set_pending(text):
+    st.session_state.pending_prompt = text
+
+
+def request_regen(cid):
+    st.session_state.pending_regen = cid
+
+
+def undo_last(cid):
+    hist = st.session_state.chat_histories.get(cid, [])
+    if len(hist) >= 2:
+        del hist[-2:]
+
+
+def clear_chat(cid):
+    st.session_state.chat_histories[cid] = []
+
+
+def surprise_me():
+    chars = all_characters()
+    go_to_chat(random.choice(chars)["id"])
+
+
+def randomize_idea():
+    idea = random.choice(IDEAS)
+    st.session_state.cc_name = idea["name"]
+    st.session_state.cc_role = idea["role"]
+    st.session_state.cc_personality = idea["personality"]
+    st.session_state.cc_ability = idea["ability"]
+    st.session_state.cc_genre = idea["genre"]
+    st.session_state.cc_emoji = random.choice(EMOJIS)
+
+
+def save_notes(case_id):
+    st.session_state.notes[case_id] = st.session_state.get(f"notes_{case_id}", "")
+
+
+def set_ask(hkey, text):
+    st.session_state.ask_pending = [hkey, text]
+
+
+def export_state():
+    data = {k: st.session_state[k] for k in SAVE_KEYS}
+    data["saved_at"] = datetime.now().isoformat(timespec="seconds")
+    return json.dumps(data, ensure_ascii=False, indent=2)
+
+
+def import_state(raw):
+    data = json.loads(raw)
+    for k in SAVE_KEYS:
+        if k in data and isinstance(data[k], type(DEFAULTS[k])):
+            st.session_state[k] = data[k]
+
+
+def parse_json_block(text):
+    try:
+        start, end = text.index("{"), text.rindex("}") + 1
+        return json.loads(text[start:end], strict=False)
+    except Exception:
+        return None
+
+
+def check_achievements():
+    s = st.session_state
+    deepest = max([len(v) // 2 for v in s.chat_histories.values()] or [0])
+    conditions = {
+        "first_hello": total_chats() >= 1,
+        "social": len(s.visited_characters) >= 3,
+        "chatterbox": total_chats() >= 15,
+        "secret_seeker": deepest >= 4,
+        "creator": len(s.custom_characters) >= 1,
+        "collector": len(s.favorites) >= 3,
+        "director": s.scenes_made >= 1,
+        "polyglot": bool(s.used_language),
+        "detective": len(s.solved_cases) >= 1,
+        "master_detective": len(s.solved_cases) >= len(CASES),
+    }
+    for aid, ok in conditions.items():
+        if ok and aid not in s.achievements:
+            s.achievements.append(aid)
+            emoji, title, _ = ACHIEVEMENTS[aid]
+            st.toast(f"Achievement unlocked: {title}", icon=emoji)
+
+
 # ---------- Styling ----------
 st.markdown("""
 <style>
@@ -179,135 +382,126 @@ st.markdown("""
 html, body, .stApp {font-family:'DM Sans',sans-serif;}
 .stApp {
   background:
-    radial-gradient(ellipse at 10% 0%, rgba(103,58,183,.24), transparent 34%),
-    radial-gradient(ellipse at 90% 75%, rgba(14,116,144,.17), transparent 34%),
+    radial-gradient(ellipse at 10% 0%, rgba(103,58,183,.26), transparent 34%),
+    radial-gradient(ellipse at 90% 75%, rgba(14,116,144,.18), transparent 34%),
     linear-gradient(145deg,#080b18 0%,#111329 48%,#17132e 100%);
   color:#f8fafc;
 }
 #MainMenu, footer, header {visibility:hidden;}
-.block-container {max-width:1220px;padding-top:1.5rem;padding-bottom:3rem;}
+.block-container {max-width:1220px;padding-top:1.4rem;padding-bottom:3rem;}
 h1,h2,h3,h4 {font-family:'Space Grotesk',sans-serif!important;color:#fff!important;}
 p, label, .stMarkdown, li {color:#dce2f5;}
 [data-testid="stCaptionContainer"], [data-testid="stCaptionContainer"] * {color:#aeb8d6!important;}
 [data-testid="stSidebar"] {background:linear-gradient(180deg,#0c1022,#15132c);border-right:1px solid #ffffff15;}
 [data-testid="stSidebar"] * {color:#e8eaff;}
 
-/* ---------- Hero ---------- */
-.hero {
-  padding:32px 30px;border-radius:25px;margin-bottom:26px;text-align:left;
+/* Hero */
+.hero {padding:32px 30px;border-radius:25px;margin-bottom:26px;
   background:linear-gradient(110deg,rgba(124,58,237,.32),rgba(14,116,144,.18)),
              radial-gradient(circle at 85% 20%,rgba(236,72,153,.18),transparent 35%);
-  border:1px solid rgba(196,181,253,.22);box-shadow:0 18px 55px #0003;
-}
+  border:1px solid rgba(196,181,253,.22);box-shadow:0 18px 55px #0003;}
 .hero-kicker {font-size:11px;letter-spacing:3px;color:#c4b5fd;font-weight:800;}
 .hero h1 {font-size:clamp(32px,5vw,54px);line-height:1.05;margin:8px 0 10px;font-weight:800;}
-.hero p {font-size:15px;color:#d6d5f7;margin:0;max-width:700px;}
-.mini-hero {display:flex;align-items:center;gap:10px;margin-bottom:14px;}
+.hero p {font-size:15px;color:#d6d5f7;margin:0;max-width:720px;}
+.mini-hero {display:flex;align-items:center;gap:10px;margin-bottom:12px;}
 .mini-hero .t {font-family:'Space Grotesk';font-weight:800;font-size:15px;letter-spacing:3px;color:#c4b5fd;}
 
-/* ---------- Cards ---------- */
-.character-tile {
-  background:linear-gradient(145deg,rgba(34,36,70,.95),rgba(20,25,49,.95));
-  border:1px solid rgba(167,139,250,.22);border-radius:20px;padding:18px 18px 15px;
-  min-height:190px;box-shadow:0 12px 30px #0002;transition:all .2s ease;
-}
-.character-tile:hover {border-color:#a78bfa;transform:translateY(-3px);box-shadow:0 16px 35px #0004;}
+/* Stats */
+.stat-row {display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:0 0 22px;}
+.stat {background:#ffffff0a;border:1px solid #ffffff15;border-radius:14px;padding:12px 14px;}
+.stat .n {font-size:24px;font-weight:800;color:#fff;font-family:'Space Grotesk';}
+.stat .l {font-size:10.5px;color:#aeb8d6;letter-spacing:1.5px;text-transform:uppercase;}
+
+/* Cards */
+.character-tile {background:linear-gradient(145deg,rgba(34,36,70,.95),rgba(20,25,49,.95));
+  border:1px solid rgba(167,139,250,.22);border-top:3px solid var(--accent,#8b5cf6);border-radius:20px;
+  padding:18px 18px 15px;min-height:215px;box-shadow:0 12px 30px #0002;transition:all .2s ease;}
+.character-tile:hover {border-color:var(--accent,#a78bfa);transform:translateY(-3px);box-shadow:0 16px 35px #0004;}
 .avatar {font-size:38px;margin-bottom:7px;}
 .char-name {font-family:'Space Grotesk';font-size:20px;font-weight:800;color:#fff;}
 .char-role {font-size:12px;color:#c4b5fd;margin:2px 0 9px;}
 .char-intro {font-size:13px;color:#d7dcef;line-height:1.5;min-height:55px;}
-.panel {
-  background:linear-gradient(145deg,rgba(37,39,76,.72),rgba(17,24,48,.78));
-  border:1px solid #ffffff17;border-radius:20px;padding:20px;margin:12px 0;
-}
+.chip {display:inline-block;padding:3px 10px;border-radius:999px;font-size:11px;background:#ffffff12;border:1px solid #ffffff1f;color:#dbeafe;margin:8px 5px 0 0;}
+.panel {background:linear-gradient(145deg,rgba(37,39,76,.72),rgba(17,24,48,.78));
+  border:1px solid #ffffff17;border-radius:20px;padding:20px;margin:12px 0;}
 .panel p {color:#dce2f5;}
 .small-muted {font-size:12px;color:#aeb8d6;}
 .section-kicker {font-size:11px;letter-spacing:2px;color:#a78bfa;font-weight:800;text-transform:uppercase;}
 
-/* ---------- Notices (replace st.info/success/warning: always readable) ---------- */
-.notice {
-  display:flex;gap:12px;align-items:flex-start;padding:14px 16px;border-radius:14px;
-  margin:12px 0;font-size:14.5px;line-height:1.55;border:1px solid;
-}
+/* Notices */
+.notice {display:flex;gap:12px;align-items:flex-start;padding:14px 16px;border-radius:14px;margin:12px 0;
+  font-size:14.5px;line-height:1.55;border:1px solid;}
 .notice .ni {font-size:20px;line-height:1.2;}
-.notice.info    {background:rgba(56,189,248,.13); border-color:rgba(56,189,248,.5);  color:#e0f2fe;}
-.notice.success {background:rgba(34,197,94,.15);  border-color:rgba(34,197,94,.55);  color:#dcfce7;}
-.notice.warning {background:rgba(245,158,11,.15); border-color:rgba(245,158,11,.55); color:#fef3c7;}
-.notice.error   {background:rgba(239,68,68,.15);  border-color:rgba(239,68,68,.55);  color:#fee2e2;}
+.notice.info {background:rgba(56,189,248,.13);border-color:rgba(56,189,248,.5);color:#e0f2fe;}
+.notice.success {background:rgba(34,197,94,.15);border-color:rgba(34,197,94,.55);color:#dcfce7;}
+.notice.warning {background:rgba(245,158,11,.15);border-color:rgba(245,158,11,.55);color:#fef3c7;}
+.notice.error {background:rgba(239,68,68,.15);border-color:rgba(239,68,68,.55);color:#fee2e2;}
 
-/* ---------- Mystery clue cards ---------- */
-.clue {
-  display:flex;gap:12px;align-items:flex-start;background:#ffffff0a;border:1px solid #ffffff18;
-  border-left:4px solid #a78bfa;border-radius:12px;padding:12px 14px;margin:8px 0;color:#eef2ff;font-size:14.5px;
-}
+/* Mystery */
+.clue {display:flex;gap:12px;align-items:flex-start;background:#ffffff0a;border:1px solid #ffffff18;
+  border-left:4px solid #a78bfa;border-radius:12px;padding:12px 14px;margin:8px 0;color:#eef2ff;font-size:14.5px;}
 .clue b {color:#c4b5fd;white-space:nowrap;}
+.suspect {background:#171b35;border:1px solid #ffffff1c;border-radius:14px;padding:12px 14px;margin:8px 0;color:#f1f5f9;font-size:14px;line-height:1.5;}
+.suspect .nm {font-weight:800;font-size:15px;color:#fff;}
+.suspect .ev {color:#fcd34d;font-size:13px;}
 
-/* ---------- Inputs ---------- */
-.stTextInput input,.stNumberInput input,.stTextArea textarea {
-  background:#171b35!important;color:#fff!important;border:1px solid #ffffff20!important;border-radius:12px!important;
-}
+/* Dialogue bubbles + badges */
+.bubble {max-width:80%;padding:12px 15px;border-radius:16px;margin:10px 0;background:#171b35;
+  border:1px solid #ffffff1a;color:#f1f5f9;font-size:14.5px;line-height:1.55;}
+.bubble.right {margin-left:auto;background:#1e1b4b;}
+.bubble .who {font-weight:800;font-size:12px;letter-spacing:.5px;margin-bottom:3px;}
+.badge {background:linear-gradient(145deg,rgba(37,39,76,.8),rgba(17,24,48,.85));border:1px solid #a78bfa55;
+  border-radius:16px;padding:16px;text-align:center;margin-bottom:12px;min-height:150px;}
+.badge.locked {opacity:.42;filter:grayscale(1);}
+.badge .e {font-size:34px;} .badge .t {font-weight:800;color:#fff;margin-top:6px;} .badge .d {font-size:12px;color:#c3cbe6;margin-top:4px;}
+
+/* Inputs */
+.stTextInput input,.stNumberInput input,.stTextArea textarea {background:#171b35!important;color:#fff!important;
+  border:1px solid #ffffff20!important;border-radius:12px!important;}
 .stTextInput input::placeholder,.stTextArea textarea::placeholder {color:#8894b8!important;}
 div[data-baseweb="select"] > div {background:#171b35!important;border:1px solid #ffffff20!important;border-radius:12px!important;}
 div[data-baseweb="select"] * {color:#f1f5f9!important;}
-div[data-baseweb="popover"] ul, div[data-baseweb="popover"] li, div[data-baseweb="menu"] {
-  background:#1b1f3d!important;color:#f1f5f9!important;
-}
+div[data-baseweb="popover"] ul, div[data-baseweb="popover"] li, div[data-baseweb="menu"] {background:#1b1f3d!important;color:#f1f5f9!important;}
 div[data-baseweb="popover"] li:hover {background:#2c3170!important;}
-
-/* Radio options as clickable cards */
 div[role="radiogroup"] {gap:8px;}
-div[role="radiogroup"] > label {
-  background:#171b35;border:1px solid #ffffff22;border-radius:12px;padding:11px 14px;width:100%;
-  transition:all .15s ease;
-}
+div[role="radiogroup"] > label {background:#171b35;border:1px solid #ffffff22;border-radius:12px;padding:11px 14px;width:100%;transition:all .15s ease;}
 div[role="radiogroup"] > label:hover {border-color:#a78bfa;background:#1e2347;}
 div[role="radiogroup"] > label p, div[role="radiogroup"] > label span, div[role="radiogroup"] > label div {color:#f1f5f9!important;}
 div[role="radiogroup"] > label:has(input:checked) {border-color:#a78bfa;background:rgba(124,58,237,.25);}
-
-/* Buttons */
-.stButton button,.stFormSubmitButton button {
-  border-radius:12px;min-height:42px;font-weight:700;border:1px solid #ffffff20;
-  background:linear-gradient(95deg,#7c3aed,#4f46e5);color:white!important;
-}
-.stButton button p {color:white!important;}
-.stButton button:hover,.stFormSubmitButton button:hover {border-color:#c4b5fd;background:linear-gradient(95deg,#6d28d9,#4338ca);}
+.stButton button,.stFormSubmitButton button,.stDownloadButton button {border-radius:12px;min-height:42px;font-weight:700;
+  border:1px solid #ffffff20;background:linear-gradient(95deg,#7c3aed,#4f46e5);color:white!important;transition:all .15s ease;}
+.stButton button p,.stDownloadButton button p {color:white!important;}
+.stButton button:hover,.stFormSubmitButton button:hover,.stDownloadButton button:hover {border-color:#c4b5fd;
+  background:linear-gradient(95deg,#6d28d9,#4338ca);transform:translateY(-1px);}
+button[data-baseweb="tab"] p {color:#c7d0ea!important;font-weight:600;}
+button[data-baseweb="tab"][aria-selected="true"] p {color:#fff!important;}
 
 /* Chat */
 [data-testid="stChatMessage"] {background:#171b35cc;border:1px solid #ffffff14;border-radius:16px;}
 [data-testid="stChatMessage"] p, [data-testid="stChatMessage"] li {color:#f1f5f9;}
 [data-testid="stChatInput"] {background:transparent!important;}
-[data-testid="stChatInput"] > div,
-[data-testid="stChatInput"] form,
-[data-testid="stChatInput"] textarea,
-[data-testid="stChatInput"] textarea[data-testid="stChatInputTextArea"] {
-  background:#f8fafc!important;color:#111827!important;-webkit-text-fill-color:#111827!important;
-  caret-color:#111827!important;border:1px solid #cbd5e1!important;border-radius:14px!important;
-}
+[data-testid="stChatInput"] > div, [data-testid="stChatInput"] form, [data-testid="stChatInput"] textarea,
+[data-testid="stChatInput"] textarea[data-testid="stChatInputTextArea"] {background:#f8fafc!important;color:#111827!important;
+  -webkit-text-fill-color:#111827!important;caret-color:#111827!important;border:1px solid #cbd5e1!important;border-radius:14px!important;}
 [data-testid="stChatInput"] textarea::placeholder {color:#64748b!important;-webkit-text-fill-color:#64748b!important;opacity:1!important;}
 [data-testid="stChatInput"] textarea:focus {border:1px solid #8b5cf6!important;box-shadow:0 0 0 3px rgba(139,92,246,.18)!important;}
 [data-testid="stChatInput"] button {color:#4f46e5!important;}
 [data-testid="stChatInput"] button svg {fill:#4f46e5!important;}
 
-/* Expander / form / misc */
 [data-testid="stExpander"] {background:#171b35aa;border:1px solid #ffffff1a!important;border-radius:14px;}
 [data-testid="stExpander"] summary, [data-testid="stExpander"] summary * {color:#f1f5f9!important;}
+[data-testid="stVerticalBlockBorderWrapper"] {border-color:#ffffff1c!important;border-radius:16px;}
 div[data-testid="stForm"] {background:#ffffff06;padding:18px;border:1px solid #ffffff14;border-radius:18px;}
 [data-testid="stMetricValue"] {color:#fff!important;}
 hr {border-color:#ffffff20;}
 .stProgress > div > div > div > div {background:linear-gradient(90deg,#8b5cf6,#22d3ee);}
+
+@media (max-width:760px) {
+  .hero {padding:22px 18px;} .hero h1 {font-size:30px;}
+  .stat-row {grid-template-columns:repeat(2,1fr);} .bubble {max-width:94%;}
+}
 </style>
 """, unsafe_allow_html=True)
-
-
-# ---------- Small UI helper ----------
-def notice(kind, text):
-    """Dark, colour-coded message box. Always readable (no white-on-white)."""
-    icons = {"info": "💡", "success": "🎉", "warning": "🧐", "error": "⛔"}
-    st.markdown(
-        f'<div class="notice {kind}"><div class="ni">{icons.get(kind, "💡")}</div>'
-        f'<div>{html.escape(text)}</div></div>',
-        unsafe_allow_html=True,
-    )
 
 
 # ---------- Ollama Cloud ----------
@@ -315,16 +509,23 @@ def get_model():
     return str(st.secrets.get("OLLAMA_MODEL", "gemma4:31b")).strip() or "gemma4:31b"
 
 
-def get_ai_response(messages):
+def make_client():
     api_key = st.secrets.get("OLLAMA_API_KEY", "")
     if not api_key:
         raise ValueError("OLLAMA_API_KEY is missing in Streamlit Secrets.")
-    client = Client(
-        host="https://ollama.com",
-        headers={"Authorization": f"Bearer {api_key}"},
-    )
-    response = client.chat(model=get_model(), messages=messages, stream=False)
+    return Client(host="https://ollama.com", headers={"Authorization": f"Bearer {api_key}"})
+
+
+def get_ai_response(messages):
+    response = make_client().chat(model=get_model(), messages=messages, stream=False)
     return response.message.content.strip()
+
+
+def stream_ai_response(messages):
+    for chunk in make_client().chat(model=get_model(), messages=messages, stream=True):
+        piece = chunk.message.content
+        if piece:
+            yield piece
 
 
 def show_error(error):
@@ -347,13 +548,8 @@ def show_error(error):
             st.code(str(error))
 
 
-# ---------- Chat logic ----------
-def chat_with_character(character, history, user_message, mood):
-    secret_rule = (
-        "The character has a private funny secret. Do not reveal it immediately. "
-        "Drop subtle hints naturally, and reveal it only if the user asks directly, "
-        "discovers it through conversation, or has exchanged at least 4 messages."
-    )
+# ---------- Prompt builders ----------
+def build_chat_messages(character, history, user_message, mood):
     extra = ""
     if character.get("age"):
         extra += f"\nAge: {character['age']}"
@@ -361,7 +557,6 @@ def chat_with_character(character, history, user_message, mood):
         extra += f"\nSpecial ability: {character['power']}"
     if character.get("profile"):
         extra += f"\nFull profile (stay consistent with it):\n{character['profile']}"
-
     lang = language_rule()
     system_prompt = f"""
 You are roleplaying as {character['name']}, a fictional character in an entertaining interactive universe.
@@ -373,10 +568,10 @@ Private secret (keep hidden at first): {character['secret']}
 
 Roleplay rules:
 - {lang}
-- Stay in character and make the conversation feel lively, natural and memorable.
-- {secret_rule}
-- Use humour, playful surprises and occasional unexpected reactions suited to this character.
-- Ask the user interesting follow-up questions sometimes, but don't ask one every time.
+- Stay in character and make the conversation lively, natural and memorable.
+- Drop subtle hints about the secret; reveal it only if the user asks directly, works it out, or has exchanged at least 4 messages.
+- Use humour, playful surprises and unexpected reactions suited to this character.
+- Ask a follow-up question sometimes, but not every time.
 - Keep replies around 2-6 sentences unless the user asks for detail.
 - Do not claim to know real private facts about the user.
 - Keep everything friendly, age-appropriate and non-graphic.
@@ -385,66 +580,69 @@ Conversation style requested: {mood}
 
 Reminder: {lang}
 """
-    messages = [{"role": "system", "content": system_prompt}]
-    messages.extend(history[-16:])
-    messages.append({"role": "user", "content": user_message})
-    return get_ai_response(messages)
+    return [{"role": "system", "content": system_prompt}, *history[-16:], {"role": "user", "content": user_message}]
 
 
-def send_chat_message(character, user_message, mood="Surprise me"):
-    history = ensure_history(character["id"])
-    try:
-        with st.spinner(f"{character['name']} is thinking up something..."):
-            reply = chat_with_character(character, history, user_message, mood)
-        history.append({"role": "user", "content": user_message})
-        history.append({"role": "assistant", "content": reply})
-        if character["id"] not in st.session_state.visited_characters:
-            st.session_state.visited_characters.append(character["id"])
-        return True
-    except Exception as error:
-        show_error(error)
-        return False
-
-
-# ---------- Navigation helpers ----------
-def go_to_chat(character_id):
-    st.session_state.selected_character = character_id
-    st.session_state.navigation = "Chat"
-
-
-def go_to_page(page):
-    st.session_state.navigation = page
+def build_suspect_messages(case, name, history, question):
+    s = case["suspects"][name]
+    behaviour = (
+        "You ARE the culprit. Never confess outright, however pressed. Deflect with silly but plausible excuses, "
+        "and let one tiny detail slip."
+        if s["guilty"] else
+        "You are innocent. Be honest and quirky, and you may mention one thing you noticed about another suspect."
+    )
+    lang = language_rule()
+    system = f"""
+You are {name} {s['emoji']}, a suspect in a light-hearted family-friendly detective game: "{case['title']}".
+Story: {case['story']}
+Clues the detective knows: {' | '.join(case['clues'])}
+Your public statement: {s['statement']}
+What others can observe about you: {s['evidence']}
+Private truth (never quote it directly): {s['truth']}
+{behaviour}
+Answer in 1-3 sentences, in character. {lang}
+"""
+    return [{"role": "system", "content": system}, *history[-10:], {"role": "user", "content": question}]
 
 
 # ---------- Sidebar ----------
+NAV_ICONS = {"Discover": "🪐", "Chat": "💬", "Crossover": "🎬", "Create": "🧪",
+             "My Characters": "📚", "Mystery Room": "🔐", "Achievements": "🏆"}
 st.sidebar.markdown("# 🌌 THE UNKNOWN")
 st.sidebar.caption("A universe full of unusual characters.")
-pages = ["Discover", "Create", "My Characters", "Chat", "Mystery Room"]
-st.sidebar.radio("Explore", pages, key="navigation", label_visibility="collapsed")
+st.sidebar.radio("Explore", list(NAV_ICONS.keys()), key="navigation", label_visibility="collapsed",
+                 format_func=lambda p: f"{NAV_ICONS[p]}  {p}")
 st.sidebar.markdown("---")
-st.sidebar.markdown("### 🌐 Language")
-st.sidebar.selectbox(
-    "Reply language",
-    list(LANGUAGES.keys()),
-    key="reply_language",
-    help="Auto: characters reply in the same language you write in. Or force one language.",
-)
+st.sidebar.selectbox("🌐 Reply language", list(LANGUAGES.keys()), key="reply_language",
+                     help="Auto: characters reply in the language you write in. Or force one language.")
+if LANGUAGES.get(st.session_state.reply_language):
+    st.session_state.used_language = True
 st.sidebar.markdown("---")
-st.sidebar.markdown("### ✨ Your journey")
-total_chats = sum(len(v) // 2 for v in st.session_state.chat_histories.values())
-st.sidebar.metric("Conversations", total_chats)
-st.sidebar.metric("Characters met", len(st.session_state.visited_characters))
-st.sidebar.caption("Your progress lasts for this active session.")
+st.sidebar.metric("Conversations", total_chats())
+st.sidebar.metric("Achievements", f"{len(st.session_state.achievements)}/{len(ACHIEVEMENTS)}")
+with st.sidebar.expander("💾 Save / Load progress"):
+    st.caption("Progress lives only in this session. Download it to keep your characters and chats.")
+    st.download_button("⬇️ Download save file", export_state(), file_name="the_unknown_save.json",
+                       mime="application/json", use_container_width=True)
+    upload = st.file_uploader("Load a save file", type=["json"], key="save_upload")
+    if upload is not None and st.button("📂 Load it", use_container_width=True):
+        try:
+            import_state(upload.getvalue().decode("utf-8"))
+            st.toast("Progress loaded!", icon="✅")
+            st.rerun()
+        except Exception:
+            st.error("That file couldn't be loaded.")
+
+nav = st.session_state.navigation
 
 # ---------- Header ----------
-if st.session_state.navigation == "Discover":
+if nav == "Discover":
     st.markdown("""
     <div class="hero">
       <div class="hero-kicker">✦ A WORLD OF STORIES, SECRETS & UNEXPECTED FRIENDS ✦</div>
       <h1>THE UNKNOWN</h1>
-      <p>Step into a strange little universe. Meet unforgettable characters, uncover their secrets,
-      solve curious mysteries, and create someone entirely your own.
-      Talk in any language — they will answer in yours.</p>
+      <p>Meet unforgettable characters, uncover their secrets, stage crossover scenes, solve mysteries
+      and create someone entirely your own. Talk in any language — they answer in yours.</p>
     </div>
     """, unsafe_allow_html=True)
 else:
@@ -454,180 +652,287 @@ else:
 # =========================================================
 # DISCOVER
 # =========================================================
-if st.session_state.navigation == "Discover":
-    st.markdown('<div class="section-kicker">Your next conversation is waiting</div>', unsafe_allow_html=True)
-    st.markdown("## 🪐 Choose who to meet")
-    st.caption("Every character has a different personality. Pick one and see where the conversation goes.")
-
-    if st.session_state.daily_id is None:
-        st.session_state.daily_id = random.choice(PRESET_CHARACTERS)["id"]
-    daily = get_character(st.session_state.daily_id) or PRESET_CHARACTERS[0]
-
+if nav == "Discover":
     st.markdown(f"""
-    <div class="panel">
-      <div class="section-kicker">✦ Unexpected encounter</div>
-      <div style="font-size:25px;font-weight:800;color:white">{daily['emoji']} {html.escape(daily['name'])} is waiting</div>
-      <div style="color:#c4b5fd;font-size:13px">{html.escape(daily['role'])}</div>
-      <p style="margin:8px 0 0">“{html.escape(daily['opening'])}”</p>
+    <div class="stat-row">
+      <div class="stat"><div class="n">{len(all_characters())}</div><div class="l">Characters</div></div>
+      <div class="stat"><div class="n">{total_chats()}</div><div class="l">Conversations</div></div>
+      <div class="stat"><div class="n">{len(st.session_state.favorites)}</div><div class="l">Favourites</div></div>
+      <div class="stat"><div class="n">{len(st.session_state.solved_cases)}/{len(CASES)}</div><div class="l">Cases solved</div></div>
     </div>
     """, unsafe_allow_html=True)
-    st.button(
-        f"Meet {daily['name']}  →",
-        key="daily_meet",
-        use_container_width=True,
-        on_click=go_to_chat,
-        args=(daily["id"],),
-    )
 
+    if st.session_state.daily_id is None or get_character(st.session_state.daily_id) is None:
+        st.session_state.daily_id = random.choice(PRESET_CHARACTERS)["id"]
+    daily = get_character(st.session_state.daily_id)
+    st.markdown(f"""
+    <div class="panel" style="border-left:4px solid {safe_color(daily.get('color'))}">
+      <div class="section-kicker">✦ Unexpected encounter</div>
+      <div style="font-size:25px;font-weight:800;color:white">{esc(daily['emoji'])} {esc(daily['name'])} is waiting</div>
+      <div style="color:#c4b5fd;font-size:13px">{esc(daily['role'])}</div>
+      <p style="margin:8px 0 0">“{esc(daily['opening'])}”</p>
+    </div>
+    """, unsafe_allow_html=True)
+    b1, b2 = st.columns([3, 1])
+    b1.button(f"Meet {daily['name']}  →", key="daily_meet", use_container_width=True, on_click=go_to_chat, args=(daily["id"],))
+    b2.button("🎲 Surprise me", key="surprise", use_container_width=True, on_click=surprise_me)
+
+    st.markdown("## 🪐 Choose who to meet")
+    f1, f2 = st.columns([2, 1])
+    query = f1.text_input("Search", placeholder="🔍 Search by name, role or vibe...", label_visibility="collapsed", key="disc_q")
+    genres = sorted({c["genre"] for c in all_characters()})
+    flt = f2.selectbox("Filter", ["All", "❤️ Favourites", "✨ My creations", *genres], label_visibility="collapsed", key="disc_f")
+
+    def visible(c):
+        if query and query.lower() not in " ".join(str(c.get(k, "")) for k in ("name", "role", "vibe", "genre", "intro")).lower():
+            return False
+        if flt == "❤️ Favourites":
+            return c["id"] in st.session_state.favorites
+        if flt == "✨ My creations":
+            return bool(c.get("custom"))
+        return flt == "All" or c["genre"] == flt
+
+    shown = [c for c in all_characters() if visible(c)]
+    if not shown:
+        notice("info", "No characters match that search. Try another word or filter.")
     cols = st.columns(3)
-    for index, character in enumerate(PRESET_CHARACTERS):
+    for index, c in enumerate(shown):
         with cols[index % 3]:
+            tag = '<span class="chip">✨ Yours</span>' if c.get("custom") else ""
             st.markdown(f"""
-            <div class="character-tile">
-              <div class="avatar">{character['emoji']}</div>
-              <div class="char-name">{html.escape(character['name'])}</div>
-              <div class="char-role">{html.escape(character['role'])}</div>
-              <div class="char-intro">{html.escape(character['intro'])}</div>
-              <div class="small-muted" style="margin-top:9px">{html.escape(character['vibe'])}</div>
+            <div class="character-tile" style="--accent:{safe_color(c.get('color'))}">
+              <div class="avatar">{esc(c['emoji'])}</div>
+              <div class="char-name">{esc(c['name'])}</div>
+              <div class="char-role">{esc(c['role'])}</div>
+              <div class="char-intro">{esc(c['intro'])}</div>
+              <span class="chip">{esc(c['genre'])}</span>{tag}
+              <div class="small-muted" style="margin-top:9px">{esc(c.get('vibe', ''))}</div>
             </div>
             """, unsafe_allow_html=True)
-            st.button(
-                f"💬 Meet {character['name']}",
-                key=f"meet_{character['id']}",
-                use_container_width=True,
-                on_click=go_to_chat,
-                args=(character["id"],),
-            )
+            m1, m2 = st.columns([4, 1])
+            m1.button(f"💬 Meet {c['name']}", key=f"meet_{c['id']}", use_container_width=True, on_click=go_to_chat, args=(c["id"],))
+            m2.button("❤️" if c["id"] in st.session_state.favorites else "🤍", key=f"fav_{c['id']}",
+                      use_container_width=True, on_click=toggle_fav, args=(c["id"],))
 
     st.markdown("---")
-    left, right = st.columns(2)
-    with left:
+    a, b, c3 = st.columns(3)
+    with a:
+        st.markdown("### 🎬 Crossover")
+        st.write("Put two characters in one scene and watch them talk.")
+        st.button("Stage a scene →", use_container_width=True, on_click=go_to_page, args=("Crossover",), key="d_cross")
+    with b:
         st.markdown("### 🎨 Have an idea?")
-        st.write("Create your own character with a unique personality, world and special ability.")
-        st.button("Create a character →", use_container_width=True, on_click=go_to_page, args=("Create",))
-    with right:
+        st.write("Create your own character with its own secret and opening line.")
+        st.button("Create a character →", use_container_width=True, on_click=go_to_page, args=("Create",), key="d_create")
+    with c3:
         st.markdown("### 🔐 Feeling curious?")
-        st.write("Try the Mystery Room and see if you can solve a strange little case.")
-        st.button("Enter Mystery Room →", use_container_width=True, on_click=go_to_page, args=("Mystery Room",))
+        st.write("Three cases. Interrogate suspects, take notes, make your accusation.")
+        st.button("Enter Mystery Room →", use_container_width=True, on_click=go_to_page, args=("Mystery Room",), key="d_myst")
 
 # =========================================================
 # CHAT
 # =========================================================
-elif st.session_state.navigation == "Chat":
+elif nav == "Chat":
     characters = all_characters()
-    if not characters:
-        notice("info", "No characters yet. Create one first.")
-    else:
-        ids = [c["id"] for c in characters]
-        selected = st.session_state.selected_character
-        if selected not in ids:
-            selected = "zayn" if "zayn" in ids else ids[0]
+    ids = [c["id"] for c in characters]
+    selected = st.session_state.selected_character
+    if selected not in ids:
+        selected = "zayn"
 
-        st.markdown("## 💬 The Conversation Room")
-        st.caption("🌐 Type in any language — the character replies in the same one.")
+    st.markdown("## 💬 The Conversation Room")
+    st.caption("🌐 Type in any language — the character replies in the same one.")
 
-        char_options = {f"{c['emoji']}  {c['name']} — {c['role']}": c["id"] for c in characters}
-        labels = list(char_options.keys())
-        current_label = next((label for label, cid in char_options.items() if cid == selected), labels[0])
-        chosen_label = st.selectbox(
-            "Who do you want to talk to?", labels, index=labels.index(current_label), key="chat_character_select"
-        )
-        chosen_id = char_options[chosen_label]
-        if chosen_id != st.session_state.selected_character:
-            st.session_state.selected_character = chosen_id
-            st.rerun()
-        character = get_character(chosen_id)
-        history = ensure_history(chosen_id)
+    char_options = {f"{c['emoji']}  {c['name']} — {c['role']}": c["id"] for c in characters}
+    labels = list(char_options.keys())
+    current_label = next(lbl for lbl, cid in char_options.items() if cid == selected)
+    chosen_label = st.selectbox("Who do you want to talk to?", labels, index=labels.index(current_label), key="chat_character_select")
+    chosen_id = char_options[chosen_label]
+    if chosen_id != st.session_state.selected_character:
+        st.session_state.selected_character = chosen_id
+        st.rerun()
+    character = get_character(chosen_id)
+    history = ensure_history(chosen_id)
+    color = safe_color(character.get("color"))
 
-        st.markdown(f"""
-        <div class="panel">
-          <div style="display:flex;gap:16px;align-items:center">
-            <div style="font-size:48px">{character['emoji']}</div>
-            <div>
-              <div style="font-size:23px;font-weight:800;color:white">{html.escape(character['name'])}</div>
-              <div style="color:#c4b5fd;font-size:13px">{html.escape(character['role'])} · {html.escape(character['genre'])}</div>
-              <div class="small-muted">{html.escape(character.get('vibe', character.get('personality', '')))}</div>
-            </div>
-          </div>
-          <p style="margin:12px 0 0">{html.escape(character['intro'])}</p>
+    st.markdown(f"""
+    <div class="panel" style="border-left:4px solid {color}">
+      <div style="display:flex;gap:16px;align-items:center">
+        <div style="font-size:48px">{esc(character['emoji'])}</div>
+        <div>
+          <div style="font-size:23px;font-weight:800;color:white">{esc(character['name'])}</div>
+          <div style="color:#c4b5fd;font-size:13px">{esc(character['role'])} · {esc(character['genre'])}</div>
+          <div class="small-muted">{esc(character.get('vibe', character.get('personality', '')))}</div>
         </div>
-        """, unsafe_allow_html=True)
+      </div>
+      <p style="margin:12px 0 0">{esc(character['intro'])}</p>
+    </div>
+    """, unsafe_allow_html=True)
+    mood = st.selectbox("Conversation vibe", MOODS, key=f"mood_{chosen_id}")
 
-        mood = st.selectbox(
-            "Conversation vibe",
-            ["Surprise me", "Extra funny", "Mysterious", "Friendly", "Curious / interview mode"],
-            key=f"mood_{chosen_id}",
-        )
+    typed_message = st.chat_input(f"Message {character['name']}...")
+    message_to_send = None
+    if st.session_state.pending_regen == chosen_id and len(history) >= 2 and history[-1]["role"] == "assistant":
+        history.pop()
+        message_to_send = history.pop()["content"]
+    st.session_state.pending_regen = None
+    message_to_send = message_to_send or typed_message or st.session_state.pending_prompt
+    st.session_state.pending_prompt = None
 
-        # Opening line always shows as the first chat bubble
+    with st.chat_message("assistant", avatar=character["emoji"]):
+        st.markdown(character.get("opening", "Hello! What shall we talk about?"))
+    for message in history:
+        who = "user" if message["role"] == "user" else "assistant"
+        with st.chat_message(who, avatar="🧑" if who == "user" else character["emoji"]):
+            st.markdown(message["content"])
+
+    if message_to_send:
+        with st.chat_message("user", avatar="🧑"):
+            st.markdown(message_to_send)
+        ok = False
         with st.chat_message("assistant", avatar=character["emoji"]):
-            st.markdown(character.get("opening", "Hello! What shall we talk about?"))
-
-        if not history:
-            st.markdown("**Need an idea? Try one:**")
-            prompt_cols = st.columns(2)
-            for i, prompt in enumerate(character.get("prompts", ["Tell me about yourself.", "Surprise me!"])):
-                with prompt_cols[i % 2]:
-                    if st.button(prompt, key=f"prompt_{chosen_id}_{i}", use_container_width=True):
-                        st.session_state.pending_prompt = prompt
-                        st.rerun()
-        else:
-            for message in history:
-                if message["role"] == "user":
-                    with st.chat_message("user", avatar="🧑"):
-                        st.markdown(message["content"])
-                else:
-                    with st.chat_message("assistant", avatar=character["emoji"]):
-                        st.markdown(message["content"])
-
-        count = len(history) // 2
-        if count >= 1:
-            st.markdown('<div class="small-muted" style="margin-top:10px">🔎 Secret meter</div>', unsafe_allow_html=True)
-            st.progress(min(count / 4, 1.0))
-            if count >= 4:
-                notice("success", "You've spent enough time with them. Ask directly — the secret may be ready to slip out!")
-            elif count >= 3:
-                notice("info", "You're getting closer to this character's secret. Keep asking clever questions!")
-
-        if history and st.button("🧹 Clear this conversation", key=f"clear_{chosen_id}"):
-            st.session_state.chat_histories[chosen_id] = []
+            try:
+                reply = st.write_stream(stream_ai_response(build_chat_messages(character, history, message_to_send, mood)))
+                history.append({"role": "user", "content": message_to_send})
+                history.append({"role": "assistant", "content": str(reply).strip()})
+                if chosen_id not in st.session_state.visited_characters:
+                    st.session_state.visited_characters.append(chosen_id)
+                ok = True
+            except Exception as error:
+                show_error(error)
+        if ok:
             st.rerun()
 
-        typed_message = st.chat_input(f"Message {character['name']}...")
-        pending = st.session_state.pending_prompt
-        message_to_send = typed_message or pending
-        if message_to_send:
-            st.session_state.pending_prompt = None
-            if send_chat_message(character, message_to_send, mood):
-                st.rerun()
+    if not history:
+        st.markdown("**Need an idea? Try one:**")
+        pcols = st.columns(2)
+        for i, prompt in enumerate(character.get("prompts", ["Tell me about yourself.", "Surprise me!"])):
+            pcols[i % 2].button(prompt, key=f"prompt_{chosen_id}_{i}", use_container_width=True, on_click=set_pending, args=(prompt,))
+    else:
+        count = len(history) // 2
+        (_, bond_name, bond_emoji), nxt, progress = bond_level(count)
+        st.markdown(f'<div class="small-muted" style="margin-top:12px">{bond_emoji} Bond: <b>{bond_name}</b>'
+                    f'{f" · next level at {nxt} exchanges" if nxt else " · max level"}</div>', unsafe_allow_html=True)
+        st.progress(min(progress, 1.0))
+        if count >= 4:
+            notice("success", "You've spent enough time together. Ask directly — the secret may be ready to slip out!")
+        elif count >= 3:
+            notice("info", "You're getting closer to this character's secret. Keep asking clever questions!")
+
+        transcript = "\n\n".join(
+            f"{'You' if m['role'] == 'user' else character['name']}: {m['content']}" for m in history)
+        k1, k2, k3, k4, k5 = st.columns(5)
+        k1.button("❤️ Unfavourite" if chosen_id in st.session_state.favorites else "🤍 Favourite", key="c_fav",
+                  use_container_width=True, on_click=toggle_fav, args=(chosen_id,))
+        k2.button("🔄 Regenerate", key="c_regen", use_container_width=True, on_click=request_regen, args=(chosen_id,))
+        k3.button("↩️ Undo", key="c_undo", use_container_width=True, on_click=undo_last, args=(chosen_id,))
+        k4.button("🧹 Clear", key="c_clear", use_container_width=True, on_click=clear_chat, args=(chosen_id,))
+        k5.download_button("⬇️ Save chat", transcript, file_name=f"chat_with_{character['name']}.txt", use_container_width=True)
+
+# =========================================================
+# CROSSOVER
+# =========================================================
+elif nav == "Crossover":
+    st.markdown("## 🎬 Crossover Stage")
+    st.caption("Pick two characters and a topic. The AI writes the scene — in your language.")
+    characters = all_characters()
+    names = {c["id"]: f"{c['emoji']} {c['name']}" for c in characters}
+    ids = list(names.keys())
+    c1, c2 = st.columns(2)
+    a_id = c1.selectbox("Character A", ids, format_func=lambda i: names[i], index=0, key="cross_a")
+    b_id = c2.selectbox("Character B", ids, format_func=lambda i: names[i], index=min(1, len(ids) - 1), key="cross_b")
+    t1, t2 = st.columns([3, 1])
+    topic = t1.text_input("Topic", key="scene_topic", placeholder="e.g. A stolen umbrella, the best pizza topping, a haunted bus...")
+    tone = t2.selectbox("Tone", ["Funny", "Dramatic", "Mysterious", "Wholesome"], key="cross_tone")
+
+    def run_scene(cont=False):
+        A, B = get_character(a_id), get_character(b_id)
+        scene = st.session_state.scene if cont and st.session_state.scene else {"lines": []}
+        prior = "\n".join(f"{s}: {t}" for s, t in scene["lines"])
+        lang = language_rule(auto_hint="the topic text (or the previous dialogue if continuing)")
+        prompt = f"""
+Write a short {tone.lower()} dialogue scene between {A['name']} ({A['role']}; {A['personality']}) and {B['name']} ({B['role']}; {B['personality']}).
+Topic: {topic.strip() or 'something unexpected happens'}
+{'Previous dialogue:' + chr(10) + prior + chr(10) + 'Continue the scene with 6 new lines.' if cont and prior else 'Write 8 lines.'}
+Rules: output ONLY dialogue, one line per turn, formatted exactly as "Name: line". Use exactly the names "{A['name']}" and "{B['name']}".
+Each line is 1-2 sentences. Stay in character, keep it family-friendly, and don't reveal either character's secret too easily.
+{lang}
+"""
+        text = get_ai_response([{"role": "user", "content": prompt}])
+        lines = list(scene["lines"])
+        for raw in text.splitlines():
+            clean = raw.replace("**", "").strip().lstrip("-•* ").strip()
+            if not clean:
+                continue
+            for nm in (A["name"], B["name"]):
+                if clean.startswith(nm + ":") or clean.startswith(nm + "："):
+                    lines.append((nm, clean[len(nm) + 1:].strip()))
+                    break
+            else:
+                if lines:
+                    lines[-1] = (lines[-1][0], lines[-1][1] + " " + clean)
+        st.session_state.scene = {"a": a_id, "b": b_id, "topic": topic, "lines": lines}
+        st.session_state.scenes_made += 1
+
+    if a_id == b_id:
+        notice("warning", "Pick two different characters for a crossover.")
+    else:
+        g1, g2 = st.columns(2)
+        gen = g1.button("🎬 Action! Write the scene", use_container_width=True, key="gen_scene")
+        cont = g2.button("➕ Continue scene", use_container_width=True, key="cont_scene",
+                         disabled=not st.session_state.scene)
+        if gen or cont:
+            try:
+                with st.spinner("The cast is on stage..."):
+                    run_scene(cont=cont)
+            except Exception as error:
+                show_error(error)
+
+    scene = st.session_state.scene
+    if scene and a_id != b_id:
+        A, B = get_character(scene["a"]), get_character(scene["b"])
+        if A and B:
+            st.markdown(f"### {esc(A['emoji'])} {esc(A['name'])}  ×  {esc(B['emoji'])} {esc(B['name'])}")
+            script = []
+            for speaker, text in scene["lines"]:
+                ch = A if speaker == A["name"] else B
+                side = "" if ch is A else " right"
+                st.markdown(f'<div class="bubble{side}"><div class="who" style="color:{safe_color(ch.get("color"))}">'
+                            f'{esc(ch["emoji"])} {esc(speaker)}</div>{esc(text)}</div>', unsafe_allow_html=True)
+                script.append(f"{speaker}: {text}")
+            st.download_button("⬇️ Save scene", "\n".join(script), file_name="crossover_scene.txt")
 
 # =========================================================
 # CREATE
 # =========================================================
-elif st.session_state.navigation == "Create":
+elif nav == "Create":
     st.markdown("## 🧪 Build a new personality")
-    st.caption("Give your character a few ingredients. The AI will turn them into a story-worthy personality. "
-               "Write in any language — the profile will be written in the same one.")
+    st.caption("Give your character a few ingredients. The AI writes the profile, secret, opening line and conversation starters. "
+               "Write in any language — the character will use it.")
+    st.button("🎲 Give me a random idea", on_click=randomize_idea)
     with st.form("create_character_form"):
         c1, c2 = st.columns(2)
         with c1:
-            name = st.text_input("Character name", placeholder="e.g. Nova Starling")
-            role = st.text_input("Role / occupation", placeholder="Time traveller, chef, detective...")
-            personality = st.text_input("Personality", placeholder="Sarcastic, kind, dramatic...")
+            name = st.text_input("Character name", key="cc_name", placeholder="e.g. Nova Starling")
+            role = st.text_input("Role / occupation", key="cc_role", placeholder="Time traveller, chef, detective...")
+            personality = st.text_input("Personality", key="cc_personality", placeholder="Sarcastic, kind, dramatic...")
+            ability = st.text_input("Special ability", key="cc_ability", placeholder="Can hear thoughts, controls weather...")
         with c2:
-            age = st.number_input("Age", min_value=1, max_value=150, value=22)
-            genre = st.selectbox("Universe", ["Fantasy", "Mystery", "Sci-Fi", "Adventure", "Comedy", "Superhero", "Magical World"])
-            ability = st.text_input("Special ability", placeholder="Can hear thoughts, controls weather...")
-        concept = st.text_area("A little extra detail (optional)", placeholder="A secret, a funny habit, a strange goal...", height=90)
+            age = st.number_input("Age", min_value=1, max_value=150, key="cc_age")
+            genre = st.selectbox("Universe", UNIVERSES, key="cc_genre")
+            e1, e2 = st.columns(2)
+            emoji = e1.selectbox("Avatar", EMOJIS, key="cc_emoji")
+            color_pick = e2.color_picker("Theme colour", key="cc_color")
+        concept = st.text_area("A little extra detail (optional)", key="cc_concept", height=90,
+                               placeholder="A secret, a funny habit, a strange goal...")
         submitted = st.form_submit_button("✨ Bring this character to life", use_container_width=True)
 
     if submitted:
         if not all([name.strip(), role.strip(), personality.strip(), ability.strip()]):
             notice("warning", "Fill in the name, role, personality and special ability.")
         else:
-            lang = language_rule(auto_hint="the character details provided above (name, role, personality, ability, extra detail)")
+            lang = language_rule(auto_hint="the character details provided above")
             prompt = f"""
-Create a compact, original, age-appropriate fictional character profile.
+Create an original, age-appropriate fictional character for a chat game.
 Name: {name.strip()}
 Age: {age}
 Role: {role.strip()}
@@ -635,137 +940,199 @@ Personality: {personality.strip()}
 Universe: {genre}
 Special ability: {ability.strip()}
 Extra detail: {concept.strip() or 'Invent one fitting detail.'}
-Include: a short introduction, backstory, strengths, weakness, goal, rival, and one memorable funny or dramatic quote.
-Keep it engaging and not too long. Do not change the supplied name or ability.
-{lang}
+
+Return ONLY a valid JSON object (no markdown fences) with exactly these keys:
+"intro": a 1-2 sentence teaser,
+"profile": markdown text with short sections: Introduction, Backstory, Strengths, Weakness, Goal, Rival, Famous quote,
+"secret": one funny, harmless secret (1 sentence),
+"opening": the character's first line when meeting someone (1-2 sentences, in character),
+"prompts": an array of 3 short conversation starters a user could say to the character.
+Do not change the supplied name or ability. Keep JSON keys in English; the text values follow this rule: {lang}
 """
             try:
                 with st.spinner("The universe is inventing someone..."):
-                    profile = get_ai_response([{"role": "user", "content": prompt}])
+                    raw = get_ai_response([{"role": "user", "content": prompt}])
+                data = parse_json_block(raw) or {}
+                prompts = data.get("prompts")
                 new_character = {
-                    "id": str(uuid.uuid4()),
-                    "name": name.strip(),
-                    "emoji": "🪄",
-                    "role": role.strip(),
-                    "age": age,
-                    "genre": genre,
-                    "vibe": personality.strip(),
-                    "personality": personality.strip(),
-                    "power": ability.strip(),
-                    "intro": concept.strip() or f"{name.strip()} is a {role.strip()} in a {genre} universe.",
-                    "secret": "A secret waiting to be discovered through conversation.",
-                    "opening": f"Well, hello there. I'm {name.strip()}. What brings you to my corner of the universe?",
-                    "prompts": ["Tell me your story.", "What are you hiding?", "Surprise me."],
-                    "profile": profile,
-                    "custom": True,
+                    "id": str(uuid.uuid4()), "name": name.strip(), "emoji": emoji, "role": role.strip(), "age": age,
+                    "genre": genre, "vibe": personality.strip(), "personality": personality.strip(), "power": ability.strip(),
+                    "intro": str(data.get("intro") or concept.strip() or f"{name.strip()} is a {role.strip()} in a {genre} universe."),
+                    "secret": str(data.get("secret") or "A secret waiting to be discovered through conversation."),
+                    "opening": str(data.get("opening") or f"Well, hello there. I'm {name.strip()}. What brings you to my corner of the universe?"),
+                    "prompts": [str(p) for p in prompts][:4] if isinstance(prompts, list) and prompts else
+                               ["Tell me your story.", "What are you hiding?", "Surprise me."],
+                    "profile": str(data.get("profile") or raw),
+                    "color": color_pick, "custom": True,
                 }
                 st.session_state.custom_characters.append(new_character)
                 st.session_state.selected_character = new_character["id"]
-                notice("success", f"{name.strip()} has entered the universe!")
-                st.markdown(f'<div class="panel">{html.escape(profile).replace(chr(10), "<br>")}</div>', unsafe_allow_html=True)
-                st.button(
-                    "💬 Chat with your new character",
-                    key="new_character_chat",
-                    on_click=go_to_chat,
-                    args=(new_character["id"],),
-                )
+                st.toast(f"{new_character['name']} has entered the universe!", icon=emoji)
+                notice("success", f"{new_character['name']} has entered the universe!")
+                with st.container(border=True):
+                    st.markdown(f"### {emoji} {new_character['name']}")
+                    st.markdown(new_character["profile"])
+                st.button("💬 Chat with your new character", key="new_character_chat",
+                          on_click=go_to_chat, args=(new_character["id"],))
             except Exception as error:
                 show_error(error)
 
 # =========================================================
 # MY CHARACTERS
 # =========================================================
-elif st.session_state.navigation == "My Characters":
+elif nav == "My Characters":
     st.markdown("## 📚 Your character collection")
     custom = st.session_state.custom_characters
     if not custom:
         notice("info", "Your collection is empty. The characters you create will appear here.")
         st.button("Create your first character →", on_click=go_to_page, args=("Create",))
     else:
-        for character in custom:
-            with st.expander(f"{character['emoji']}  {character['name']} — {character['role']}", expanded=False):
+        for character in list(custom):
+            cid = character["id"]
+            with st.expander(f"{character['emoji']}  {character['name']} — {character['role']}"):
                 st.markdown(character.get("profile", character["intro"]))
-                a, b = st.columns(2)
-                with a:
-                    st.button(
-                        "💬 Chat",
-                        key=f"custom_chat_{character['id']}",
-                        use_container_width=True,
-                        on_click=go_to_chat,
-                        args=(character["id"],),
-                    )
-                with b:
-                    if st.button("🗑️ Delete", key=f"custom_delete_{character['id']}", use_container_width=True):
-                        st.session_state.custom_characters = [c for c in custom if c["id"] != character["id"]]
-                        st.session_state.chat_histories.pop(character["id"], None)
-                        if st.session_state.selected_character == character["id"]:
-                            st.session_state.selected_character = None
+                st.markdown(f'<span class="chip">🔒 Secret: {esc(character["secret"])}</span>', unsafe_allow_html=True)
+                a, b, c = st.columns(3)
+                a.button("💬 Chat", key=f"custom_chat_{cid}", use_container_width=True, on_click=go_to_chat, args=(cid,))
+                b.button("❤️ Unfavourite" if cid in st.session_state.favorites else "🤍 Favourite", key=f"cfav_{cid}",
+                         use_container_width=True, on_click=toggle_fav, args=(cid,))
+                if c.button("🗑️ Delete", key=f"custom_delete_{cid}", use_container_width=True):
+                    st.session_state.custom_characters = [x for x in custom if x["id"] != cid]
+                    st.session_state.chat_histories.pop(cid, None)
+                    if cid in st.session_state.favorites:
+                        st.session_state.favorites.remove(cid)
+                    if st.session_state.selected_character == cid:
+                        st.session_state.selected_character = None
+                    st.rerun()
+                with st.form(f"edit_{cid}"):
+                    st.markdown("**✏️ Edit**")
+                    e1, e2 = st.columns(2)
+                    n_name = e1.text_input("Name", value=character["name"], key=f"en_{cid}")
+                    n_role = e2.text_input("Role", value=character["role"], key=f"er_{cid}")
+                    n_secret = st.text_input("Secret", value=character["secret"], key=f"es_{cid}")
+                    n_open = st.text_input("Opening line", value=character["opening"], key=f"eo_{cid}")
+                    n_color = st.color_picker("Theme colour", value=safe_color(character.get("color")), key=f"ec_{cid}")
+                    if st.form_submit_button("💾 Save changes", use_container_width=True):
+                        character.update(name=n_name.strip() or character["name"], role=n_role.strip() or character["role"],
+                                         secret=n_secret.strip() or character["secret"],
+                                         opening=n_open.strip() or character["opening"], color=n_color)
+                        st.toast("Saved!", icon="💾")
                         st.rerun()
 
 # =========================================================
-# MYSTERY ROOM - MINI GAME
+# MYSTERY ROOM
 # =========================================================
-elif st.session_state.navigation == "Mystery Room":
+elif nav == "Mystery Room":
     st.markdown("## 🔐 The Mystery Room")
-    st.caption("A tiny case. Three clues. One suspicious suspect. Can you solve it?")
+    st.caption("Read the file, interrogate suspects (in any language), take notes, then make your accusation.")
+    solved = st.session_state.solved_cases
 
-    st.markdown("""
-    <div class="panel">
-      <div class="section-kicker">CASE 001 · THE VANISHING CUPCAKE</div>
-      <div style="font-size:26px;font-weight:800;color:white;margin:4px 0 8px">🧁 Who took the last cupcake?</div>
-      <p style="margin:0 0 10px">At exactly 4 PM, the last cupcake disappeared from the kitchen. Three suspects were nearby.</p>
-      <div class="clue"><b>🔎 Clue 1</b><span>The culprit had purple icing on their sleeve.</span></div>
-      <div class="clue"><b>🔎 Clue 2</b><span>The culprit said they were in the garden, but it had been raining and their shoes were completely dry.</span></div>
-      <div class="clue"><b>🔎 Clue 3</b><span>One suspect was holding a plate and insisting they had already eaten.</span></div>
-    </div>
-    """, unsafe_allow_html=True)
+    def case_label(cid):
+        c = CASE_BY_ID[cid]
+        stars = solved.get(cid)
+        return f"{c['emoji']} {c['title']} · {c['level']}" + (f"   ✅ {'⭐' * int(stars)}" if stars else "")
 
-    suspects = {
-        "Zayn 🕶️": "claims he was reading a book in the library.",
-        "Boo 👻": "says they were floating in the garden.",
-        "Professor Chaos 🧪": "says the cupcake was part of a scientific experiment.",
-    }
+    case_id = st.selectbox("Choose a case", [c["id"] for c in CASES], format_func=case_label, key="case_pick")
+    case = CASE_BY_ID[case_id]
+    names = list(case["suspects"].keys())
 
-    st.markdown("### 🕵️ Who do you suspect?")
-    answer = st.radio(
-        "Choose a suspect",
-        list(suspects.keys()),
-        index=None,
-        key="mystery_choice",
-        label_visibility="collapsed",
-        format_func=lambda s: f"{s}  —  {suspects[s]}",
-    )
+    tab_file, tab_ask, tab_notes, tab_accuse = st.tabs(["📜 Case file", "🗣️ Interrogate", "📝 Notebook", "⚖️ Accuse"])
 
-    attempts = st.session_state.mystery_attempts
-    if attempts:
-        st.markdown(f'<div class="small-muted">Attempts so far: {attempts}</div>', unsafe_allow_html=True)
+    with tab_file:
+        clues = "".join(f'<div class="clue"><b>🔎 Clue {i + 1}</b><span>{esc(t)}</span></div>' for i, t in enumerate(case["clues"]))
+        st.markdown(f"""
+        <div class="panel">
+          <div class="section-kicker">CASE · {esc(case['level'])}</div>
+          <div style="font-size:26px;font-weight:800;color:white;margin:4px 0 8px">{case['emoji']} {esc(case['title'])}</div>
+          <p style="margin:0 0 10px">{esc(case['story'])}</p>{clues}
+        </div>""", unsafe_allow_html=True)
+        st.markdown("### 🕵️ Suspects")
+        for nm, s in case["suspects"].items():
+            st.markdown(f'<div class="suspect"><div class="nm">{s["emoji"]} {esc(nm)}</div>{esc(s["statement"])}'
+                        f'<div class="ev">👁️ {esc(s["evidence"])}</div></div>', unsafe_allow_html=True)
 
-    if st.button("🔎 Submit my theory", use_container_width=True):
-        st.session_state.mystery_attempts += 1
-        if answer and answer.startswith("Professor"):
-            st.session_state.mystery_answered = True
-            st.balloons()
-            notice("success", "Case solved! Professor Chaos had purple icing on the sleeve and a very suspicious plate. "
-                              "The 'experiment' was apparently delicious.")
-        elif answer:
-            notice("warning", "Not quite! Re-read the clues. One suspect's explanation is especially suspicious.")
-            if st.session_state.mystery_attempts >= 2:
-                notice("info", "Hint: only one suspect admits the cupcake was actually handled — "
-                               "and calls it 'science' instead of an alibi.")
-        else:
-            notice("warning", "Choose a suspect first.")
+    with tab_ask:
+        who = st.selectbox("Who do you want to question?", names, key=f"who_{case_id}",
+                           format_func=lambda n: f"{case['suspects'][n]['emoji']} {n}")
+        hkey = f"{case_id}:{who}"
+        hist = st.session_state.interrogations.setdefault(hkey, [])
+        for m in hist:
+            is_user = m["role"] == "user"
+            with st.chat_message("user" if is_user else "assistant", avatar="🕵️" if is_user else case["suspects"][who]["emoji"]):
+                st.markdown(m["content"])
+        st.markdown('<div class="small-muted">Quick questions</div>', unsafe_allow_html=True)
+        qcols = st.columns(3)
+        for i, q in enumerate(["Where were you at the time?", "What did you notice about the others?", "Do you want to change your story?"]):
+            qcols[i].button(q, key=f"qq_{case_id}_{i}", use_container_width=True, on_click=set_ask, args=(hkey, q))
+        with st.form(f"ask_form_{case_id}", clear_on_submit=True):
+            typed_q = st.text_input("Your question", placeholder=f"Ask {who} anything...", key=f"q_{case_id}")
+            asked = st.form_submit_button("🗣️ Ask", use_container_width=True)
+        question = typed_q.strip() if asked and typed_q.strip() else None
+        pend = st.session_state.ask_pending
+        if pend and pend[0] == hkey:
+            question = pend[1]
+        st.session_state.ask_pending = None
+        if question:
+            with st.chat_message("user", avatar="🕵️"):
+                st.markdown(question)
+            ok = False
+            with st.chat_message("assistant", avatar=case["suspects"][who]["emoji"]):
+                try:
+                    reply = st.write_stream(stream_ai_response(build_suspect_messages(case, who, hist, question)))
+                    hist.append({"role": "user", "content": question})
+                    hist.append({"role": "assistant", "content": str(reply).strip()})
+                    ok = True
+                except Exception as error:
+                    show_error(error)
+            if ok:
+                st.rerun()
 
-    if st.session_state.mystery_answered:
-        st.markdown("### 🏆 Achievement unlocked: Cupcake Detective")
-        st.markdown(f'<div class="small-muted">Solved in {st.session_state.mystery_attempts} attempt(s).</div>',
-                    unsafe_allow_html=True)
-        if st.button("Play the case again"):
-            st.session_state.mystery_answered = False
-            st.session_state.mystery_attempts = 0
-            st.session_state.pop("mystery_choice", None)
-            st.rerun()
+    with tab_notes:
+        st.text_area("Detective notes", value=st.session_state.notes.get(case_id, ""), key=f"notes_{case_id}", height=220,
+                     placeholder="Who has an alibi? Whose evidence doesn't match?", on_change=save_notes, args=(case_id,))
+        st.caption("Notes are saved automatically for this case.")
+
+    with tab_accuse:
+        attempts = st.session_state.case_attempts.get(case_id, 0)
+        stars = solved.get(case_id)
+        if stars:
+            notice("success", f"You solved this case {'⭐' * int(stars)}. {case['solution']}")
+        guess = st.radio("Who did it?", names, index=None, key=f"guess_{case_id}",
+                         format_func=lambda n: f"{case['suspects'][n]['emoji']} {n}  —  {case['suspects'][n]['statement']}")
+        if attempts:
+            st.markdown(f'<div class="small-muted">Attempts so far: {attempts}</div>', unsafe_allow_html=True)
+        if st.button("⚖️ Submit accusation", use_container_width=True, key=f"acc_{case_id}"):
+            if not guess:
+                notice("warning", "Choose a suspect first.")
+            else:
+                st.session_state.case_attempts[case_id] = attempts + 1
+                if case["suspects"][guess]["guilty"]:
+                    if not stars:
+                        solved[case_id] = max(1, 3 - attempts)
+                    st.balloons()
+                    notice("success", f"Case solved! {case['solution']}")
+                else:
+                    notice("warning", f"{guess} is innocent. Re-read the evidence and try again.")
+                    if attempts + 1 >= 2:
+                        notice("info", f"Hint: {case['hint']}")
+
+# =========================================================
+# ACHIEVEMENTS
+# =========================================================
+elif nav == "Achievements":
+    st.markdown("## 🏆 Achievements")
+    earned = st.session_state.achievements
+    st.progress(len(earned) / len(ACHIEVEMENTS))
+    st.caption(f"{len(earned)} of {len(ACHIEVEMENTS)} unlocked")
+    cols = st.columns(3)
+    for i, (aid, (emoji, title, desc)) in enumerate(ACHIEVEMENTS.items()):
+        locked = "" if aid in earned else " locked"
+        cols[i % 3].markdown(
+            f'<div class="badge{locked}"><div class="e">{emoji}</div><div class="t">{esc(title)}</div>'
+            f'<div class="d">{esc(desc)}</div></div>', unsafe_allow_html=True)
 
 # ---------- Footer ----------
+check_achievements()
 st.markdown("---")
 st.markdown(
     "<div style='text-align:center;color:#8994b7;font-size:12px'>"
