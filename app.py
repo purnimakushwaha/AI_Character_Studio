@@ -14,6 +14,46 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
+# ---------- Languages ----------
+# None = auto-detect: the character answers in whatever language/script the user writes in.
+LANGUAGES = {
+    "🌐 Auto (match my language)": None,
+    "English": "English",
+    "हिन्दी (Hindi - Devanagari)": "Hindi written in Devanagari script",
+    "Hinglish (Hindi in English letters)": "Hinglish (Hindi written in Roman/English letters)",
+    "ਪੰਜਾਬੀ (Punjabi)": "Punjabi written in Gurmukhi script",
+    "বাংলা (Bengali)": "Bengali",
+    "தமிழ் (Tamil)": "Tamil",
+    "తెలుగు (Telugu)": "Telugu",
+    "मराठी (Marathi)": "Marathi",
+    "اردو (Urdu)": "Urdu",
+    "Español": "Spanish",
+    "Français": "French",
+    "Deutsch": "German",
+    "Português": "Portuguese",
+    "العربية": "Arabic",
+    "日本語": "Japanese",
+    "한국어": "Korean",
+    "中文": "Simplified Chinese",
+}
+AUTO_LANGUAGE = "🌐 Auto (match my language)"
+
+
+def language_rule(auto_hint="the user's latest message"):
+    forced = LANGUAGES.get(st.session_state.reply_language)
+    if forced:
+        return f"LANGUAGE: Always reply in {forced}, no matter which language the user writes in."
+    return (
+        f"LANGUAGE: Always reply in the same language AND script as {auto_hint}. "
+        "If it is Hindi in Devanagari, reply in Devanagari. "
+        "If it is Hindi written in English letters (Hinglish), reply in Hinglish with English letters. "
+        "If it is English, reply in English. Do the same for any other language. "
+        "If the user switches language during the chat, switch immediately. "
+        "If the message is too short to tell (like 'ok' or an emoji), keep the language used earlier in the conversation. "
+        "Only the language changes: the character's personality, humour and style stay the same."
+    )
+
+
 # ---------- Session state ----------
 DEFAULTS = {
     "custom_characters": [],
@@ -24,6 +64,8 @@ DEFAULTS = {
     "mystery_answered": False,
     "mystery_attempts": 0,
     "visited_characters": [],
+    "reply_language": AUTO_LANGUAGE,
+    "daily_id": None,
 }
 for key, value in DEFAULTS.items():
     if key not in st.session_state:
@@ -117,19 +159,24 @@ PRESET_CHARACTERS = [
     },
 ]
 
+
 def all_characters():
     return PRESET_CHARACTERS + st.session_state.custom_characters
+
 
 def get_character(character_id):
     return next((c for c in all_characters() if c["id"] == character_id), None)
 
+
 def ensure_history(character_id):
     return st.session_state.chat_histories.setdefault(character_id, [])
+
 
 # ---------- Styling ----------
 st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&display=swap');
+html, body, .stApp {font-family:'DM Sans',sans-serif;}
 .stApp {
   background:
     radial-gradient(ellipse at 10% 0%, rgba(103,58,183,.24), transparent 34%),
@@ -140,9 +187,12 @@ st.markdown("""
 #MainMenu, footer, header {visibility:hidden;}
 .block-container {max-width:1220px;padding-top:1.5rem;padding-bottom:3rem;}
 h1,h2,h3,h4 {font-family:'Space Grotesk',sans-serif!important;color:#fff!important;}
-p, label, .stMarkdown {color:#dce2f5;}
+p, label, .stMarkdown, li {color:#dce2f5;}
+[data-testid="stCaptionContainer"], [data-testid="stCaptionContainer"] * {color:#aeb8d6!important;}
 [data-testid="stSidebar"] {background:linear-gradient(180deg,#0c1022,#15132c);border-right:1px solid #ffffff15;}
 [data-testid="stSidebar"] * {color:#e8eaff;}
+
+/* ---------- Hero ---------- */
 .hero {
   padding:32px 30px;border-radius:25px;margin-bottom:26px;text-align:left;
   background:linear-gradient(110deg,rgba(124,58,237,.32),rgba(14,116,144,.18)),
@@ -152,7 +202,10 @@ p, label, .stMarkdown {color:#dce2f5;}
 .hero-kicker {font-size:11px;letter-spacing:3px;color:#c4b5fd;font-weight:800;}
 .hero h1 {font-size:clamp(32px,5vw,54px);line-height:1.05;margin:8px 0 10px;font-weight:800;}
 .hero p {font-size:15px;color:#d6d5f7;margin:0;max-width:700px;}
-.pill {display:inline-block;border:1px solid #c4b5fd45;background:#8b5cf626;border-radius:999px;padding:5px 10px;font-size:11px;color:#ddd6fe;margin:3px 4px 3px 0;}
+.mini-hero {display:flex;align-items:center;gap:10px;margin-bottom:14px;}
+.mini-hero .t {font-family:'Space Grotesk';font-weight:800;font-size:15px;letter-spacing:3px;color:#c4b5fd;}
+
+/* ---------- Cards ---------- */
 .character-tile {
   background:linear-gradient(145deg,rgba(34,36,70,.95),rgba(20,25,49,.95));
   border:1px solid rgba(167,139,250,.22);border-radius:20px;padding:18px 18px 15px;
@@ -167,59 +220,100 @@ p, label, .stMarkdown {color:#dce2f5;}
   background:linear-gradient(145deg,rgba(37,39,76,.72),rgba(17,24,48,.78));
   border:1px solid #ffffff17;border-radius:20px;padding:20px;margin:12px 0;
 }
+.panel p {color:#dce2f5;}
 .small-muted {font-size:12px;color:#aeb8d6;}
 .section-kicker {font-size:11px;letter-spacing:2px;color:#a78bfa;font-weight:800;text-transform:uppercase;}
+
+/* ---------- Notices (replace st.info/success/warning: always readable) ---------- */
+.notice {
+  display:flex;gap:12px;align-items:flex-start;padding:14px 16px;border-radius:14px;
+  margin:12px 0;font-size:14.5px;line-height:1.55;border:1px solid;
+}
+.notice .ni {font-size:20px;line-height:1.2;}
+.notice.info    {background:rgba(56,189,248,.13); border-color:rgba(56,189,248,.5);  color:#e0f2fe;}
+.notice.success {background:rgba(34,197,94,.15);  border-color:rgba(34,197,94,.55);  color:#dcfce7;}
+.notice.warning {background:rgba(245,158,11,.15); border-color:rgba(245,158,11,.55); color:#fef3c7;}
+.notice.error   {background:rgba(239,68,68,.15);  border-color:rgba(239,68,68,.55);  color:#fee2e2;}
+
+/* ---------- Mystery clue cards ---------- */
+.clue {
+  display:flex;gap:12px;align-items:flex-start;background:#ffffff0a;border:1px solid #ffffff18;
+  border-left:4px solid #a78bfa;border-radius:12px;padding:12px 14px;margin:8px 0;color:#eef2ff;font-size:14.5px;
+}
+.clue b {color:#c4b5fd;white-space:nowrap;}
+
+/* ---------- Inputs ---------- */
 .stTextInput input,.stNumberInput input,.stTextArea textarea {
   background:#171b35!important;color:#fff!important;border:1px solid #ffffff20!important;border-radius:12px!important;
 }
-div[data-baseweb="select"] {background:#171b35;border-radius:12px;}
+.stTextInput input::placeholder,.stTextArea textarea::placeholder {color:#8894b8!important;}
+div[data-baseweb="select"] > div {background:#171b35!important;border:1px solid #ffffff20!important;border-radius:12px!important;}
+div[data-baseweb="select"] * {color:#f1f5f9!important;}
+div[data-baseweb="popover"] ul, div[data-baseweb="popover"] li, div[data-baseweb="menu"] {
+  background:#1b1f3d!important;color:#f1f5f9!important;
+}
+div[data-baseweb="popover"] li:hover {background:#2c3170!important;}
+
+/* Radio options as clickable cards */
+div[role="radiogroup"] {gap:8px;}
+div[role="radiogroup"] > label {
+  background:#171b35;border:1px solid #ffffff22;border-radius:12px;padding:11px 14px;width:100%;
+  transition:all .15s ease;
+}
+div[role="radiogroup"] > label:hover {border-color:#a78bfa;background:#1e2347;}
+div[role="radiogroup"] > label p, div[role="radiogroup"] > label span, div[role="radiogroup"] > label div {color:#f1f5f9!important;}
+div[role="radiogroup"] > label:has(input:checked) {border-color:#a78bfa;background:rgba(124,58,237,.25);}
+
+/* Buttons */
 .stButton button,.stFormSubmitButton button {
   border-radius:12px;min-height:42px;font-weight:700;border:1px solid #ffffff20;
-  background:linear-gradient(95deg,#7c3aed,#4f46e5);color:white;
+  background:linear-gradient(95deg,#7c3aed,#4f46e5);color:white!important;
 }
+.stButton button p {color:white!important;}
 .stButton button:hover,.stFormSubmitButton button:hover {border-color:#c4b5fd;background:linear-gradient(95deg,#6d28d9,#4338ca);}
-[data-testid="stChatMessage"] {background:#171b35aa;border:1px solid #ffffff14;border-radius:16px;}
 
-/* Chat composer: light surface + dark readable typing text */
-[data-testid="stChatInput"] {
-  background: transparent !important;
-}
+/* Chat */
+[data-testid="stChatMessage"] {background:#171b35cc;border:1px solid #ffffff14;border-radius:16px;}
+[data-testid="stChatMessage"] p, [data-testid="stChatMessage"] li {color:#f1f5f9;}
+[data-testid="stChatInput"] {background:transparent!important;}
 [data-testid="stChatInput"] > div,
 [data-testid="stChatInput"] form,
 [data-testid="stChatInput"] textarea,
 [data-testid="stChatInput"] textarea[data-testid="stChatInputTextArea"] {
-  background: #f8fafc !important;
-  color: #111827 !important;
-  -webkit-text-fill-color: #111827 !important;
-  caret-color: #111827 !important;
-  border: 1px solid #cbd5e1 !important;
-  border-radius: 14px !important;
+  background:#f8fafc!important;color:#111827!important;-webkit-text-fill-color:#111827!important;
+  caret-color:#111827!important;border:1px solid #cbd5e1!important;border-radius:14px!important;
 }
-[data-testid="stChatInput"] textarea::placeholder,
-[data-testid="stChatInput"] textarea[data-testid="stChatInputTextArea"]::placeholder {
-  color: #64748b !important;
-  -webkit-text-fill-color: #64748b !important;
-  opacity: 1 !important;
-}
-[data-testid="stChatInput"] textarea:focus {
-  border: 1px solid #8b5cf6 !important;
-  box-shadow: 0 0 0 3px rgba(139,92,246,.18) !important;
-}
-[data-testid="stChatInput"] button {
-  color: #4f46e5 !important;
-}
-[data-testid="stChatInput"] button svg {
-  fill: #4f46e5 !important;
-}
+[data-testid="stChatInput"] textarea::placeholder {color:#64748b!important;-webkit-text-fill-color:#64748b!important;opacity:1!important;}
+[data-testid="stChatInput"] textarea:focus {border:1px solid #8b5cf6!important;box-shadow:0 0 0 3px rgba(139,92,246,.18)!important;}
+[data-testid="stChatInput"] button {color:#4f46e5!important;}
+[data-testid="stChatInput"] button svg {fill:#4f46e5!important;}
+
+/* Expander / form / misc */
+[data-testid="stExpander"] {background:#171b35aa;border:1px solid #ffffff1a!important;border-radius:14px;}
+[data-testid="stExpander"] summary, [data-testid="stExpander"] summary * {color:#f1f5f9!important;}
 div[data-testid="stForm"] {background:#ffffff06;padding:18px;border:1px solid #ffffff14;border-radius:18px;}
+[data-testid="stMetricValue"] {color:#fff!important;}
 hr {border-color:#ffffff20;}
 .stProgress > div > div > div > div {background:linear-gradient(90deg,#8b5cf6,#22d3ee);}
 </style>
 """, unsafe_allow_html=True)
 
+
+# ---------- Small UI helper ----------
+def notice(kind, text):
+    """Dark, colour-coded message box. Always readable (no white-on-white)."""
+    icons = {"info": "💡", "success": "🎉", "warning": "🧐", "error": "⛔"}
+    st.markdown(
+        f'<div class="notice {kind}"><div class="ni">{icons.get(kind, "💡")}</div>'
+        f'<div>{html.escape(text)}</div></div>',
+        unsafe_allow_html=True,
+    )
+
+
 # ---------- Ollama Cloud ----------
 def get_model():
     return str(st.secrets.get("OLLAMA_MODEL", "gemma4:31b")).strip() or "gemma4:31b"
+
 
 def get_ai_response(messages):
     api_key = st.secrets.get("OLLAMA_API_KEY", "")
@@ -232,24 +326,26 @@ def get_ai_response(messages):
     response = client.chat(model=get_model(), messages=messages, stream=False)
     return response.message.content.strip()
 
+
 def show_error(error):
     msg = str(error).lower()
     if "401" in msg or "unauthorized" in msg:
-        st.error("Ollama authentication failed. Check the API key in Streamlit Secrets.")
+        notice("error", "Ollama authentication failed. Check the API key in Streamlit Secrets.")
     elif "403" in msg or "forbidden" in msg:
-        st.error("Ollama denied access. Check your account and model access.")
+        notice("error", "Ollama denied access. Check your account and model access.")
     elif "404" in msg or "not found" in msg:
-        st.error("The configured Ollama model was not found. Check OLLAMA_MODEL.")
+        notice("error", "The configured Ollama model was not found. Check OLLAMA_MODEL.")
     elif "429" in msg or "rate limit" in msg:
-        st.error("Ollama usage limit reached. Please try again later.")
+        notice("error", "Ollama usage limit reached. Please try again later.")
     elif "timeout" in msg or "connection" in msg:
-        st.error("Could not connect to Ollama Cloud. Please try again.")
+        notice("error", "Could not connect to Ollama Cloud. Please try again.")
     elif "api_key" in msg or "missing" in msg:
-        st.error("Add OLLAMA_API_KEY in Streamlit Cloud → Settings → Secrets.")
+        notice("error", "Add OLLAMA_API_KEY in Streamlit Cloud → Settings → Secrets.")
     else:
-        st.error("Something went wrong while contacting the AI service.")
+        notice("error", "Something went wrong while contacting the AI service.")
         with st.expander("Technical details"):
             st.code(str(error))
+
 
 # ---------- Chat logic ----------
 def chat_with_character(character, history, user_message, mood):
@@ -258,15 +354,25 @@ def chat_with_character(character, history, user_message, mood):
         "Drop subtle hints naturally, and reveal it only if the user asks directly, "
         "discovers it through conversation, or has exchanged at least 4 messages."
     )
+    extra = ""
+    if character.get("age"):
+        extra += f"\nAge: {character['age']}"
+    if character.get("power"):
+        extra += f"\nSpecial ability: {character['power']}"
+    if character.get("profile"):
+        extra += f"\nFull profile (stay consistent with it):\n{character['profile']}"
+
+    lang = language_rule()
     system_prompt = f"""
 You are roleplaying as {character['name']}, a fictional character in an entertaining interactive universe.
 Character role: {character['role']}
 World: {character['genre']}
 Personality: {character['personality']}
-Background: {character['intro']}
+Background: {character['intro']}{extra}
 Private secret (keep hidden at first): {character['secret']}
 
 Roleplay rules:
+- {lang}
 - Stay in character and make the conversation feel lively, natural and memorable.
 - {secret_rule}
 - Use humour, playful surprises and occasional unexpected reactions suited to this character.
@@ -276,11 +382,14 @@ Roleplay rules:
 - Keep everything friendly, age-appropriate and non-graphic.
 - You are a fictional character, not a real person.
 Conversation style requested: {mood}
+
+Reminder: {lang}
 """
     messages = [{"role": "system", "content": system_prompt}]
     messages.extend(history[-16:])
     messages.append({"role": "user", "content": user_message})
     return get_ai_response(messages)
+
 
 def send_chat_message(character, user_message, mood="Surprise me"):
     history = ensure_history(character["id"])
@@ -296,13 +405,16 @@ def send_chat_message(character, user_message, mood="Surprise me"):
         show_error(error)
         return False
 
+
 # ---------- Navigation helpers ----------
 def go_to_chat(character_id):
     st.session_state.selected_character = character_id
     st.session_state.navigation = "Chat"
 
+
 def go_to_page(page):
     st.session_state.navigation = page
+
 
 # ---------- Sidebar ----------
 st.sidebar.markdown("# 🌌 THE UNKNOWN")
@@ -310,21 +422,34 @@ st.sidebar.caption("A universe full of unusual characters.")
 pages = ["Discover", "Create", "My Characters", "Chat", "Mystery Room"]
 st.sidebar.radio("Explore", pages, key="navigation", label_visibility="collapsed")
 st.sidebar.markdown("---")
+st.sidebar.markdown("### 🌐 Language")
+st.sidebar.selectbox(
+    "Reply language",
+    list(LANGUAGES.keys()),
+    key="reply_language",
+    help="Auto: characters reply in the same language you write in. Or force one language.",
+)
+st.sidebar.markdown("---")
 st.sidebar.markdown("### ✨ Your journey")
 total_chats = sum(len(v) // 2 for v in st.session_state.chat_histories.values())
 st.sidebar.metric("Conversations", total_chats)
 st.sidebar.metric("Characters met", len(st.session_state.visited_characters))
 st.sidebar.caption("Your progress lasts for this active session.")
 
-# ---------- Main hero ----------
-st.markdown("""
-<div class="hero">
-  <div class="hero-kicker">✦ A WORLD OF STORIES, SECRETS & UNEXPECTED FRIENDS ✦</div>
-  <h1>THE UNKNOWN</h1>
-  <p>Step into a strange little universe. Meet unforgettable characters, uncover their secrets,
-  solve curious mysteries, and create someone entirely your own.</p>
-</div>
-""", unsafe_allow_html=True)
+# ---------- Header ----------
+if st.session_state.navigation == "Discover":
+    st.markdown("""
+    <div class="hero">
+      <div class="hero-kicker">✦ A WORLD OF STORIES, SECRETS & UNEXPECTED FRIENDS ✦</div>
+      <h1>THE UNKNOWN</h1>
+      <p>Step into a strange little universe. Meet unforgettable characters, uncover their secrets,
+      solve curious mysteries, and create someone entirely your own.
+      Talk in any language — they will answer in yours.</p>
+    </div>
+    """, unsafe_allow_html=True)
+else:
+    st.markdown('<div class="mini-hero"><span style="font-size:22px">🌌</span><span class="t">THE UNKNOWN</span></div>',
+                unsafe_allow_html=True)
 
 # =========================================================
 # DISCOVER
@@ -334,27 +459,25 @@ if st.session_state.navigation == "Discover":
     st.markdown("## 🪐 Choose who to meet")
     st.caption("Every character has a different personality. Pick one and see where the conversation goes.")
 
-    # Daily encounter is random per session, but doesn't change the character list.
-    daily = PRESET_CHARACTERS[(sum(ord(ch) for ch in str(st.session_state.get("daily_seed", "unknown"))) % len(PRESET_CHARACTERS))]
-    if "daily_seed" not in st.session_state:
-        st.session_state.daily_seed = str(uuid.uuid4())
-        daily = random.choice(PRESET_CHARACTERS)
-    with st.container():
-        st.markdown(f"""
-        <div class="panel">
-          <div class="section-kicker">✦ Unexpected encounter</div>
-          <div style="font-size:25px;font-weight:800;color:white">{daily['emoji']} {daily['name']} is waiting</div>
-          <div style="color:#c4b5fd;font-size:13px">{html.escape(daily['role'])}</div>
-          <p style="margin:8px 0 0">{html.escape(daily['opening'])}</p>
-        </div>
-        """, unsafe_allow_html=True)
-        st.button(
-            f"Meet {daily['name']}  →",
-            key="daily_meet",
-            use_container_width=True,
-            on_click=go_to_chat,
-            args=(daily["id"],),
-        )
+    if st.session_state.daily_id is None:
+        st.session_state.daily_id = random.choice(PRESET_CHARACTERS)["id"]
+    daily = get_character(st.session_state.daily_id) or PRESET_CHARACTERS[0]
+
+    st.markdown(f"""
+    <div class="panel">
+      <div class="section-kicker">✦ Unexpected encounter</div>
+      <div style="font-size:25px;font-weight:800;color:white">{daily['emoji']} {html.escape(daily['name'])} is waiting</div>
+      <div style="color:#c4b5fd;font-size:13px">{html.escape(daily['role'])}</div>
+      <p style="margin:8px 0 0">“{html.escape(daily['opening'])}”</p>
+    </div>
+    """, unsafe_allow_html=True)
+    st.button(
+        f"Meet {daily['name']}  →",
+        key="daily_meet",
+        use_container_width=True,
+        on_click=go_to_chat,
+        args=(daily["id"],),
+    )
 
     cols = st.columns(3)
     for index, character in enumerate(PRESET_CHARACTERS):
@@ -381,21 +504,11 @@ if st.session_state.navigation == "Discover":
     with left:
         st.markdown("### 🎨 Have an idea?")
         st.write("Create your own character with a unique personality, world and special ability.")
-        st.button(
-            "Create a character →",
-            use_container_width=True,
-            on_click=go_to_page,
-            args=("Create",),
-        )
+        st.button("Create a character →", use_container_width=True, on_click=go_to_page, args=("Create",))
     with right:
         st.markdown("### 🔐 Feeling curious?")
         st.write("Try the Mystery Room and see if you can solve a strange little case.")
-        st.button(
-            "Enter Mystery Room →",
-            use_container_width=True,
-            on_click=go_to_page,
-            args=("Mystery Room",),
-        )
+        st.button("Enter Mystery Room →", use_container_width=True, on_click=go_to_page, args=("Mystery Room",))
 
 # =========================================================
 # CHAT
@@ -403,21 +516,22 @@ if st.session_state.navigation == "Discover":
 elif st.session_state.navigation == "Chat":
     characters = all_characters()
     if not characters:
-        st.info("No characters yet. Create one first.")
+        notice("info", "No characters yet. Create one first.")
     else:
         ids = [c["id"] for c in characters]
         selected = st.session_state.selected_character
         if selected not in ids:
             selected = "zayn" if "zayn" in ids else ids[0]
-        character = get_character(selected)
 
         st.markdown("## 💬 The Conversation Room")
-        st.caption("Choose a character, pick a conversation vibe, and start talking.")
+        st.caption("🌐 Type in any language — the character replies in the same one.")
 
         char_options = {f"{c['emoji']}  {c['name']} — {c['role']}": c["id"] for c in characters}
         labels = list(char_options.keys())
         current_label = next((label for label, cid in char_options.items() if cid == selected), labels[0])
-        chosen_label = st.selectbox("Who do you want to talk to?", labels, index=labels.index(current_label), key="chat_character_select")
+        chosen_label = st.selectbox(
+            "Who do you want to talk to?", labels, index=labels.index(current_label), key="chat_character_select"
+        )
         chosen_id = char_options[chosen_label]
         if chosen_id != st.session_state.selected_character:
             st.session_state.selected_character = chosen_id
@@ -432,17 +546,24 @@ elif st.session_state.navigation == "Chat":
             <div>
               <div style="font-size:23px;font-weight:800;color:white">{html.escape(character['name'])}</div>
               <div style="color:#c4b5fd;font-size:13px">{html.escape(character['role'])} · {html.escape(character['genre'])}</div>
-              <div class="small-muted">{html.escape(character.get('vibe', character.get('personality','')))}</div>
+              <div class="small-muted">{html.escape(character.get('vibe', character.get('personality', '')))}</div>
             </div>
           </div>
           <p style="margin:12px 0 0">{html.escape(character['intro'])}</p>
         </div>
         """, unsafe_allow_html=True)
 
-        mood = st.selectbox("Conversation vibe", ["Surprise me", "Extra funny", "Mysterious", "Friendly", "Curious / interview mode"], key=f"mood_{chosen_id}")
+        mood = st.selectbox(
+            "Conversation vibe",
+            ["Surprise me", "Extra funny", "Mysterious", "Friendly", "Curious / interview mode"],
+            key=f"mood_{chosen_id}",
+        )
+
+        # Opening line always shows as the first chat bubble
+        with st.chat_message("assistant", avatar=character["emoji"]):
+            st.markdown(character.get("opening", "Hello! What shall we talk about?"))
 
         if not history:
-            st.info(f"**{character['name']} says:** {character.get('opening', 'Hello! What shall we talk about?')}")
             st.markdown("**Need an idea? Try one:**")
             prompt_cols = st.columns(2)
             for i, prompt in enumerate(character.get("prompts", ["Tell me about yourself.", "Surprise me!"])):
@@ -452,19 +573,27 @@ elif st.session_state.navigation == "Chat":
                         st.rerun()
         else:
             for message in history:
-                with st.chat_message(message["role"]):
-                    st.markdown(message["content"])
+                if message["role"] == "user":
+                    with st.chat_message("user", avatar="🧑"):
+                        st.markdown(message["content"])
+                else:
+                    with st.chat_message("assistant", avatar=character["emoji"]):
+                        st.markdown(message["content"])
 
         count = len(history) // 2
-        if count >= 3:
-            st.success("🔎 You're getting closer to this character's secret. Keep asking clever questions!")
+        if count >= 1:
+            st.markdown('<div class="small-muted" style="margin-top:10px">🔎 Secret meter</div>', unsafe_allow_html=True)
+            st.progress(min(count / 4, 1.0))
+            if count >= 4:
+                notice("success", "You've spent enough time with them. Ask directly — the secret may be ready to slip out!")
+            elif count >= 3:
+                notice("info", "You're getting closer to this character's secret. Keep asking clever questions!")
 
-        if st.button("🧹 Clear this conversation", key=f"clear_{chosen_id}"):
+        if history and st.button("🧹 Clear this conversation", key=f"clear_{chosen_id}"):
             st.session_state.chat_histories[chosen_id] = []
             st.rerun()
 
         typed_message = st.chat_input(f"Message {character['name']}...")
-        st.caption("Your message appears in dark text on the light message box. Press Enter to send.")
         pending = st.session_state.pending_prompt
         message_to_send = typed_message or pending
         if message_to_send:
@@ -477,7 +606,8 @@ elif st.session_state.navigation == "Chat":
 # =========================================================
 elif st.session_state.navigation == "Create":
     st.markdown("## 🧪 Build a new personality")
-    st.caption("Give your character a few ingredients. The AI will turn them into a story-worthy personality.")
+    st.caption("Give your character a few ingredients. The AI will turn them into a story-worthy personality. "
+               "Write in any language — the profile will be written in the same one.")
     with st.form("create_character_form"):
         c1, c2 = st.columns(2)
         with c1:
@@ -493,8 +623,9 @@ elif st.session_state.navigation == "Create":
 
     if submitted:
         if not all([name.strip(), role.strip(), personality.strip(), ability.strip()]):
-            st.warning("Fill in the name, role, personality and special ability.")
+            notice("warning", "Fill in the name, role, personality and special ability.")
         else:
+            lang = language_rule(auto_hint="the character details provided above (name, role, personality, ability, extra detail)")
             prompt = f"""
 Create a compact, original, age-appropriate fictional character profile.
 Name: {name.strip()}
@@ -506,6 +637,7 @@ Special ability: {ability.strip()}
 Extra detail: {concept.strip() or 'Invent one fitting detail.'}
 Include: a short introduction, backstory, strengths, weakness, goal, rival, and one memorable funny or dramatic quote.
 Keep it engaging and not too long. Do not change the supplied name or ability.
+{lang}
 """
             try:
                 with st.spinner("The universe is inventing someone..."):
@@ -529,8 +661,8 @@ Keep it engaging and not too long. Do not change the supplied name or ability.
                 }
                 st.session_state.custom_characters.append(new_character)
                 st.session_state.selected_character = new_character["id"]
-                st.success(f"{name.strip()} has entered the universe!")
-                st.markdown(profile)
+                notice("success", f"{name.strip()} has entered the universe!")
+                st.markdown(f'<div class="panel">{html.escape(profile).replace(chr(10), "<br>")}</div>', unsafe_allow_html=True)
                 st.button(
                     "💬 Chat with your new character",
                     key="new_character_chat",
@@ -547,16 +679,12 @@ elif st.session_state.navigation == "My Characters":
     st.markdown("## 📚 Your character collection")
     custom = st.session_state.custom_characters
     if not custom:
-        st.info("Your collection is empty. The characters you create will appear here.")
-        st.button(
-            "Create your first character →",
-            on_click=go_to_page,
-            args=("Create",),
-        )
+        notice("info", "Your collection is empty. The characters you create will appear here.")
+        st.button("Create your first character →", on_click=go_to_page, args=("Create",))
     else:
         for character in custom:
             with st.expander(f"{character['emoji']}  {character['name']} — {character['role']}", expanded=False):
-                st.write(character.get("profile", character["intro"]))
+                st.markdown(character.get("profile", character["intro"]))
                 a, b = st.columns(2)
                 with a:
                     st.button(
@@ -580,39 +708,61 @@ elif st.session_state.navigation == "My Characters":
 elif st.session_state.navigation == "Mystery Room":
     st.markdown("## 🔐 The Mystery Room")
     st.caption("A tiny case. Three clues. One suspicious suspect. Can you solve it?")
+
     st.markdown("""
     <div class="panel">
       <div class="section-kicker">CASE 001 · THE VANISHING CUPCAKE</div>
-      <div style="font-size:26px;font-weight:800;color:white">🧁 Who took the last cupcake?</div>
-      <p>At exactly 4 PM, the last cupcake disappeared from the kitchen. Three suspects were nearby.</p>
-      <p><b>Clue 1:</b> The culprit had purple icing on their sleeve.</p>
-      <p><b>Clue 2:</b> The culprit said they were in the garden, but it had been raining and their shoes were completely dry.</p>
-      <p><b>Clue 3:</b> One suspect was holding a plate and insisting they had already eaten.</p>
+      <div style="font-size:26px;font-weight:800;color:white;margin:4px 0 8px">🧁 Who took the last cupcake?</div>
+      <p style="margin:0 0 10px">At exactly 4 PM, the last cupcake disappeared from the kitchen. Three suspects were nearby.</p>
+      <div class="clue"><b>🔎 Clue 1</b><span>The culprit had purple icing on their sleeve.</span></div>
+      <div class="clue"><b>🔎 Clue 2</b><span>The culprit said they were in the garden, but it had been raining and their shoes were completely dry.</span></div>
+      <div class="clue"><b>🔎 Clue 3</b><span>One suspect was holding a plate and insisting they had already eaten.</span></div>
     </div>
     """, unsafe_allow_html=True)
+
     suspects = {
-        "Zayn 🕶️": "Zayn claims he was reading a book in the library.",
-        "Boo 👻": "Boo says they were floating in the garden.",
-        "Professor Chaos 🧪": "The professor says the cupcake was part of a scientific experiment.",
+        "Zayn 🕶️": "claims he was reading a book in the library.",
+        "Boo 👻": "says they were floating in the garden.",
+        "Professor Chaos 🧪": "says the cupcake was part of a scientific experiment.",
     }
-    for suspect, detail in suspects.items():
-        st.markdown(f"**{suspect}** — {detail}")
-    answer = st.radio("Who do you suspect?", list(suspects.keys()), index=None, key="mystery_choice")
+
+    st.markdown("### 🕵️ Who do you suspect?")
+    answer = st.radio(
+        "Choose a suspect",
+        list(suspects.keys()),
+        index=None,
+        key="mystery_choice",
+        label_visibility="collapsed",
+        format_func=lambda s: f"{s}  —  {suspects[s]}",
+    )
+
+    attempts = st.session_state.mystery_attempts
+    if attempts:
+        st.markdown(f'<div class="small-muted">Attempts so far: {attempts}</div>', unsafe_allow_html=True)
+
     if st.button("🔎 Submit my theory", use_container_width=True):
         st.session_state.mystery_attempts += 1
         if answer and answer.startswith("Professor"):
             st.session_state.mystery_answered = True
-            st.success("Case solved! 🎉 Professor Chaos had purple icing on the sleeve and a very suspicious plate. The 'experiment' was apparently delicious.")
+            st.balloons()
+            notice("success", "Case solved! Professor Chaos had purple icing on the sleeve and a very suspicious plate. "
+                              "The 'experiment' was apparently delicious.")
         elif answer:
-            st.warning("Not quite! Re-read the clues. One suspect's explanation is especially suspicious.")
+            notice("warning", "Not quite! Re-read the clues. One suspect's explanation is especially suspicious.")
+            if st.session_state.mystery_attempts >= 2:
+                notice("info", "Hint: only one suspect admits the cupcake was actually handled — "
+                               "and calls it 'science' instead of an alibi.")
         else:
-            st.warning("Choose a suspect first.")
+            notice("warning", "Choose a suspect first.")
+
     if st.session_state.mystery_answered:
-        st.balloons()
         st.markdown("### 🏆 Achievement unlocked: Cupcake Detective")
+        st.markdown(f'<div class="small-muted">Solved in {st.session_state.mystery_attempts} attempt(s).</div>',
+                    unsafe_allow_html=True)
         if st.button("Play the case again"):
             st.session_state.mystery_answered = False
             st.session_state.mystery_attempts = 0
+            st.session_state.pop("mystery_choice", None)
             st.rerun()
 
 # ---------- Footer ----------
