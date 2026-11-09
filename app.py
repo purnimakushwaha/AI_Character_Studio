@@ -179,6 +179,38 @@ div[data-baseweb="select"] {background:#171b35;border-radius:12px;}
 }
 .stButton button:hover,.stFormSubmitButton button:hover {border-color:#c4b5fd;background:linear-gradient(95deg,#6d28d9,#4338ca);}
 [data-testid="stChatMessage"] {background:#171b35aa;border:1px solid #ffffff14;border-radius:16px;}
+
+/* Chat composer: light surface + dark readable typing text */
+[data-testid="stChatInput"] {
+  background: transparent !important;
+}
+[data-testid="stChatInput"] > div,
+[data-testid="stChatInput"] form,
+[data-testid="stChatInput"] textarea,
+[data-testid="stChatInput"] textarea[data-testid="stChatInputTextArea"] {
+  background: #f8fafc !important;
+  color: #111827 !important;
+  -webkit-text-fill-color: #111827 !important;
+  caret-color: #111827 !important;
+  border: 1px solid #cbd5e1 !important;
+  border-radius: 14px !important;
+}
+[data-testid="stChatInput"] textarea::placeholder,
+[data-testid="stChatInput"] textarea[data-testid="stChatInputTextArea"]::placeholder {
+  color: #64748b !important;
+  -webkit-text-fill-color: #64748b !important;
+  opacity: 1 !important;
+}
+[data-testid="stChatInput"] textarea:focus {
+  border: 1px solid #8b5cf6 !important;
+  box-shadow: 0 0 0 3px rgba(139,92,246,.18) !important;
+}
+[data-testid="stChatInput"] button {
+  color: #4f46e5 !important;
+}
+[data-testid="stChatInput"] button svg {
+  fill: #4f46e5 !important;
+}
 div[data-testid="stForm"] {background:#ffffff06;padding:18px;border:1px solid #ffffff14;border-radius:18px;}
 hr {border-color:#ffffff20;}
 .stProgress > div > div > div > div {background:linear-gradient(90deg,#8b5cf6,#22d3ee);}
@@ -316,9 +348,13 @@ if st.session_state.navigation == "Discover":
           <p style="margin:8px 0 0">{html.escape(daily['opening'])}</p>
         </div>
         """, unsafe_allow_html=True)
-        if st.button(f"Meet {daily['name']}  →", key="daily_meet", use_container_width=True):
-            go_to_chat(daily["id"])
-            st.rerun()
+        st.button(
+            f"Meet {daily['name']}  →",
+            key="daily_meet",
+            use_container_width=True,
+            on_click=go_to_chat,
+            args=(daily["id"],),
+        )
 
     cols = st.columns(3)
     for index, character in enumerate(PRESET_CHARACTERS):
@@ -332,24 +368,34 @@ if st.session_state.navigation == "Discover":
               <div class="small-muted" style="margin-top:9px">{html.escape(character['vibe'])}</div>
             </div>
             """, unsafe_allow_html=True)
-            if st.button(f"💬 Meet {character['name']}", key=f"meet_{character['id']}", use_container_width=True):
-                go_to_chat(character["id"])
-                st.rerun()
+            st.button(
+                f"💬 Meet {character['name']}",
+                key=f"meet_{character['id']}",
+                use_container_width=True,
+                on_click=go_to_chat,
+                args=(character["id"],),
+            )
 
     st.markdown("---")
     left, right = st.columns(2)
     with left:
         st.markdown("### 🎨 Have an idea?")
         st.write("Create your own character with a unique personality, world and special ability.")
-        if st.button("Create a character →", use_container_width=True):
-            go_to_page("Create")
-            st.rerun()
+        st.button(
+            "Create a character →",
+            use_container_width=True,
+            on_click=go_to_page,
+            args=("Create",),
+        )
     with right:
         st.markdown("### 🔐 Feeling curious?")
         st.write("Try the Mystery Room and see if you can solve a strange little case.")
-        if st.button("Enter Mystery Room →", use_container_width=True):
-            go_to_page("Mystery Room")
-            st.rerun()
+        st.button(
+            "Enter Mystery Room →",
+            use_container_width=True,
+            on_click=go_to_page,
+            args=("Mystery Room",),
+        )
 
 # =========================================================
 # CHAT
@@ -418,6 +464,7 @@ elif st.session_state.navigation == "Chat":
             st.rerun()
 
         typed_message = st.chat_input(f"Message {character['name']}...")
+        st.caption("Your message appears in dark text on the light message box. Press Enter to send.")
         pending = st.session_state.pending_prompt
         message_to_send = typed_message or pending
         if message_to_send:
@@ -484,9 +531,12 @@ Keep it engaging and not too long. Do not change the supplied name or ability.
                 st.session_state.selected_character = new_character["id"]
                 st.success(f"{name.strip()} has entered the universe!")
                 st.markdown(profile)
-                if st.button("💬 Chat with your new character", key="new_character_chat"):
-                    go_to_chat(new_character["id"])
-                    st.rerun()
+                st.button(
+                    "💬 Chat with your new character",
+                    key="new_character_chat",
+                    on_click=go_to_chat,
+                    args=(new_character["id"],),
+                )
             except Exception as error:
                 show_error(error)
 
@@ -498,18 +548,24 @@ elif st.session_state.navigation == "My Characters":
     custom = st.session_state.custom_characters
     if not custom:
         st.info("Your collection is empty. The characters you create will appear here.")
-        if st.button("Create your first character →"):
-            go_to_page("Create")
-            st.rerun()
+        st.button(
+            "Create your first character →",
+            on_click=go_to_page,
+            args=("Create",),
+        )
     else:
         for character in custom:
             with st.expander(f"{character['emoji']}  {character['name']} — {character['role']}", expanded=False):
                 st.write(character.get("profile", character["intro"]))
                 a, b = st.columns(2)
                 with a:
-                    if st.button("💬 Chat", key=f"custom_chat_{character['id']}", use_container_width=True):
-                        go_to_chat(character["id"])
-                        st.rerun()
+                    st.button(
+                        "💬 Chat",
+                        key=f"custom_chat_{character['id']}",
+                        use_container_width=True,
+                        on_click=go_to_chat,
+                        args=(character["id"],),
+                    )
                 with b:
                     if st.button("🗑️ Delete", key=f"custom_delete_{character['id']}", use_container_width=True):
                         st.session_state.custom_characters = [c for c in custom if c["id"] != character["id"]]
