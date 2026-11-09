@@ -1,6 +1,6 @@
 
 import streamlit as st
-import ollama
+from ollama import Client
 import uuid
 
 # =====================================================
