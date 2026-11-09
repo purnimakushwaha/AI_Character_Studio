@@ -211,7 +211,15 @@ CASES = [
         "solution": "Mira inspected the lock, wiped the prints like a pro, and dropped sandwich crumbs, her one weakness.",
     },
 ]
-CASE_BY_ID = {c["id"]: c for c in CASES}
+PRESET_CASE_IDS = [c["id"] for c in CASES]
+
+
+def all_cases():
+    return CASES + st.session_state.ai_cases
+
+
+def get_case(case_id):
+    return next((c for c in all_cases() if c["id"] == case_id), None)
 
 CC_DEFAULTS = {
     "cc_name": "", "cc_role": "", "cc_personality": "", "cc_ability": "", "cc_concept": "",
@@ -222,7 +230,7 @@ DEFAULTS = {
     "pending_prompt": None, "pending_regen": None, "visited_characters": [], "favorites": [],
     "achievements": [], "reply_language": AUTO_LANGUAGE, "used_language": False, "daily_id": None,
     "solved_cases": {}, "case_attempts": {}, "interrogations": {}, "notes": {}, "ask_pending": None,
-    "case_pick": "cupcake", "scene": None, "scenes_made": 0, "scene_topic": "",
+    "case_pick": "cupcake", "ai_cases": [], "scene": None, "scenes_made": 0, "scene_topic": "",
     **CC_DEFAULTS,
 }
 for key, value in DEFAULTS.items():
@@ -230,7 +238,7 @@ for key, value in DEFAULTS.items():
         st.session_state[key] = value.copy() if isinstance(value, (list, dict)) else value
 
 SAVE_KEYS = ["custom_characters", "chat_histories", "visited_characters", "favorites", "achievements",
-             "solved_cases", "case_attempts", "interrogations", "notes", "scenes_made", "used_language"]
+             "solved_cases", "case_attempts", "interrogations", "notes", "scenes_made", "used_language", "ai_cases"]
 
 
 # ---------- Helpers ----------
@@ -366,7 +374,7 @@ def check_achievements():
         "director": s.scenes_made >= 1,
         "polyglot": bool(s.used_language),
         "detective": len(s.solved_cases) >= 1,
-        "master_detective": len(s.solved_cases) >= len(CASES),
+        "master_detective": all(cid in s.solved_cases for cid in PRESET_CASE_IDS),
     }
     for aid, ok in conditions.items():
         if ok and aid not in s.achievements:
@@ -599,10 +607,118 @@ Clues the detective knows: {' | '.join(case['clues'])}
 Your public statement: {s['statement']}
 What others can observe about you: {s['evidence']}
 Private truth (never quote it directly): {s['truth']}
+{('Your personality: ' + s['personality']) if s.get('personality') else ''}
 {behaviour}
 Answer in 1-3 sentences, in character. {lang}
 """
     return [{"role": "system", "content": system}, *history[-10:], {"role": "user", "content": question}]
+
+
+# ---------- AI case generator ----------
+class CaseError(Exception):
+    pass
+
+
+CASE_SETTINGS = [
+    "a haunted school", "a space station cafeteria", "a seaside wedding", "a travelling circus", "a snowed-in mountain lodge",
+    "a robot bakery", "a midnight train", "a wizard's library", "a village cricket match", "a floating market",
+    "a school science fair", "a jungle treehouse hotel", "an underwater aquarium", "a film studio on set",
+]
+
+
+def normalize_case(data, level, chars):
+    if not isinstance(data, dict):
+        raise CaseError("The AI did not return a valid case.")
+    clues, sus = data.get("clues"), data.get("suspects")
+    if not (isinstance(clues, list) and len(clues) >= 3 and isinstance(sus, list) and len(sus) >= 3):
+        raise CaseError("Case was incomplete.")
+    by_name = {c["name"].lower(): c for c in chars}
+    suspects = {}
+    for item in sus:
+        name = str(item.get("name", "")).strip() if isinstance(item, dict) else ""
+        if not name or name in suspects:
+            raise CaseError("Bad suspect list.")
+        ch = by_name.get(name.lower())
+        entry = {
+            "emoji": ch["emoji"] if ch else str(item.get("emoji") or "👤")[:8],
+            "statement": str(item.get("statement", "")).strip(),
+            "evidence": str(item.get("evidence", "")).strip(),
+            "guilty": item.get("guilty") is True or str(item.get("guilty")).lower() == "true",
+            "truth": str(item.get("truth", "")).strip(),
+        }
+        if ch:
+            entry["personality"] = ch["personality"]
+        if not entry["statement"] or not entry["evidence"]:
+            raise CaseError("Suspect details missing.")
+        suspects[name] = entry
+    if sum(1 for v in suspects.values() if v["guilty"]) != 1:
+        raise CaseError("A case needs exactly one culprit.")
+    return {
+        "id": "ai-" + uuid.uuid4().hex[:8], "ai": True, "level": level,
+        "title": str(data.get("title") or "Untitled Case").strip(),
+        "emoji": str(data.get("emoji") or "🕵️")[:8],
+        "story": str(data.get("story") or "").strip(),
+        "clues": [str(c).strip() for c in clues[:4]],
+        "suspects": suspects,
+        "hint": str(data.get("hint") or "Compare each alibi with the evidence.").strip(),
+        "solution": str(data.get("solution") or "").strip(),
+    }
+
+
+def generate_case(level, theme, use_universe):
+    n = 4 if level == "Hard" else 3
+    pool = all_characters()
+    chars = random.sample(pool, n) if use_universe and len(pool) >= n else []
+    culprit_no = random.randint(1, n)
+    setting = theme.strip() or random.choice(CASE_SETTINGS)
+    if chars:
+        roster = "\n".join(f"Suspect {i + 1}: {c['name']} - {c['role']}; personality: {c['personality']}" for i, c in enumerate(chars))
+        suspects_rule = f"Use exactly these suspects with exactly these names:\n{roster}"
+    else:
+        suspects_rule = f"Invent exactly {n} quirky suspects (numbered 1-{n}), each with a unique name and one emoji."
+    difficulty = {
+        "Easy": "Easy: the culprit should be fairly obvious after reading all three clues.",
+        "Medium": "Medium: the player must combine at least two clues.",
+        "Hard": "Hard: the player needs all clues, and red herrings make it tricky.",
+    }[level]
+    avoid = ", ".join(c["title"] for c in all_cases())
+    lang = language_rule(auto_hint="the theme text above (English if no theme is given)")
+    prompt = f"""
+Design a fresh, light-hearted, family-friendly whodunit puzzle for a detective game.
+Setting/theme: {setting}. {difficulty}
+The missing item and the story must be original. Avoid these existing titles: {avoid}.
+{suspects_rule}
+The culprit is suspect number {culprit_no}. Everyone else is innocent.
+
+Fairness rules:
+- Exactly 3 clues. Together they must point to the culprit and only the culprit.
+- Every suspect has a "statement" (their alibi, in quotes) and "evidence" (concrete, observable details others can see).
+- The culprit's alibi must be contradicted by their own evidence, in a way the clues reveal.
+- Innocent suspects may look suspicious for one clue (a red herring) but must be cleared by another clue or their evidence.
+- No violence, no real people.
+
+Return ONLY a valid JSON object (no markdown fences) with these keys:
+"title", "emoji", "story" (2 sentences), "clues" (array of 3 strings),
+"suspects" (array of {n} objects with "name", "emoji", "statement", "evidence", "guilty" (true only for the culprit), "truth" (what that suspect privately knows, 1-2 sentences)),
+"hint" (one sentence nudge that does not name the culprit),
+"solution" (2-3 sentences naming the culprit and how the clues prove it).
+Keep JSON keys in English; text values follow this rule: {lang}
+"""
+    last_error = CaseError("Could not build a valid case.")
+    for _ in range(3):
+        raw = get_ai_response([{"role": "user", "content": prompt}])
+        try:
+            return normalize_case(parse_json_block(raw), level, chars)
+        except CaseError as err:
+            last_error = err
+    raise last_error
+
+
+def remove_case(case_id):
+    st.session_state.ai_cases = [c for c in st.session_state.ai_cases if c["id"] != case_id]
+    for store in (st.session_state.solved_cases, st.session_state.case_attempts, st.session_state.notes):
+        store.pop(case_id, None)
+    st.session_state.case_pick = PRESET_CASE_IDS[0]
 
 
 # ---------- Sidebar ----------
@@ -658,7 +774,7 @@ if nav == "Discover":
       <div class="stat"><div class="n">{len(all_characters())}</div><div class="l">Characters</div></div>
       <div class="stat"><div class="n">{total_chats()}</div><div class="l">Conversations</div></div>
       <div class="stat"><div class="n">{len(st.session_state.favorites)}</div><div class="l">Favourites</div></div>
-      <div class="stat"><div class="n">{len(st.session_state.solved_cases)}/{len(CASES)}</div><div class="l">Cases solved</div></div>
+      <div class="stat"><div class="n">{len(st.session_state.solved_cases)}/{len(all_cases())}</div><div class="l">Cases solved</div></div>
     </div>
     """, unsafe_allow_html=True)
 
@@ -1027,14 +1143,41 @@ elif nav == "Mystery Room":
     st.caption("Read the file, interrogate suspects (in any language), take notes, then make your accusation.")
     solved = st.session_state.solved_cases
 
-    def case_label(cid):
-        c = CASE_BY_ID[cid]
-        stars = solved.get(cid)
-        return f"{c['emoji']} {c['title']} · {c['level']}" + (f"   ✅ {'⭐' * int(stars)}" if stars else "")
+    with st.container(border=True):
+        st.markdown("#### 🎲 New AI case")
+        st.caption("A brand-new case every time: different story, clues, suspects and culprit.")
+        g1, g2, g3 = st.columns([1, 2, 1])
+        gen_level = g1.selectbox("Difficulty", ["Easy", "Medium", "Hard"], index=1, key="gen_level")
+        gen_theme = g2.text_input("Theme (optional)", key="gen_theme",
+                                  placeholder="haunted school, space station, wedding... (blank = random)")
+        use_universe = g3.checkbox("Use universe characters", value=True, key="gen_universe")
+        if st.button("✨ Generate a new case", use_container_width=True, key="gen_case_btn"):
+            try:
+                with st.spinner("The detective agency is writing a new case..."):
+                    new_case = generate_case(gen_level, gen_theme, use_universe)
+                st.session_state.ai_cases.append(new_case)
+                st.session_state.case_pick = new_case["id"]
+                st.toast("New case ready!", icon="🕵️")
+            except CaseError:
+                notice("error", "The AI's case wasn't valid this time. Please press Generate again.")
+            except Exception as error:
+                show_error(error)
 
-    case_id = st.selectbox("Choose a case", [c["id"] for c in CASES], format_func=case_label, key="case_pick")
-    case = CASE_BY_ID[case_id]
+    case_ids = [c["id"] for c in all_cases()]
+    if st.session_state.case_pick not in case_ids:
+        st.session_state.case_pick = case_ids[0]
+
+    def case_label(cid):
+        c = get_case(cid)
+        stars = solved.get(cid)
+        return (f"{c['emoji']} {c['title']} · {c['level']}" + ("  🤖 AI" if c.get("ai") else "")
+                + (f"   ✅ {'⭐' * int(stars)}" if stars else ""))
+
+    case_id = st.selectbox(f"Choose a case ({len(case_ids)} available)", case_ids, format_func=case_label, key="case_pick")
+    case = get_case(case_id)
     names = list(case["suspects"].keys())
+    if case.get("ai"):
+        st.button("🗑️ Remove this AI case", key=f"rm_{case_id}", on_click=remove_case, args=(case_id,))
 
     tab_file, tab_ask, tab_notes, tab_accuse = st.tabs(["📜 Case file", "🗣️ Interrogate", "📝 Notebook", "⚖️ Accuse"])
 
