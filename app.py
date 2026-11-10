@@ -230,7 +230,7 @@ DEFAULTS = {
     "pending_prompt": None, "pending_regen": None, "visited_characters": [], "favorites": [],
     "achievements": [], "reply_language": AUTO_LANGUAGE, "used_language": False, "daily_id": None,
     "solved_cases": {}, "case_attempts": {}, "interrogations": {}, "notes": {}, "ask_pending": None,
-    "case_pick": "cupcake", "ai_cases": [], "scene": None, "scenes_made": 0, "scene_topic": "",
+    "case_pick": "cupcake", "ai_cases": [], "recent": [], "scene": None, "scenes_made": 0, "scene_topic": "",
     **CC_DEFAULTS,
 }
 for key, value in DEFAULTS.items():
@@ -238,7 +238,7 @@ for key, value in DEFAULTS.items():
         st.session_state[key] = value.copy() if isinstance(value, (list, dict)) else value
 
 SAVE_KEYS = ["custom_characters", "chat_histories", "visited_characters", "favorites", "achievements",
-             "solved_cases", "case_attempts", "interrogations", "notes", "scenes_made", "used_language", "ai_cases"]
+             "solved_cases", "case_attempts", "interrogations", "notes", "scenes_made", "used_language", "ai_cases", "recent"]
 
 
 # ---------- Helpers ----------
@@ -317,6 +317,19 @@ def clear_chat(cid):
     st.session_state.chat_histories[cid] = []
 
 
+def sync_nav():
+    val = st.session_state.get("top_nav")
+    if val:
+        st.session_state.navigation = val
+
+
+def mood_picker(key):
+    if hasattr(st, "pills"):
+        val = st.pills("Conversation vibe", MOODS, default=MOODS[0], key=key, label_visibility="collapsed")
+        return val or MOODS[0]
+    return st.selectbox("Conversation vibe", MOODS, key=key)
+
+
 def surprise_me():
     chars = all_characters()
     go_to_chat(random.choice(chars)["id"])
@@ -387,58 +400,95 @@ def check_achievements():
 st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&display=swap');
+:root {--line:rgba(255,255,255,.10);--muted:#9fabcc;--accent:#8b5cf6;}
 html, body, .stApp {font-family:'DM Sans',sans-serif;}
 .stApp {
   background:
-    radial-gradient(ellipse at 10% 0%, rgba(103,58,183,.26), transparent 34%),
-    radial-gradient(ellipse at 90% 75%, rgba(14,116,144,.18), transparent 34%),
-    linear-gradient(145deg,#080b18 0%,#111329 48%,#17132e 100%);
-  color:#f8fafc;
+    radial-gradient(ellipse at 8% 0%, rgba(103,58,183,.30), transparent 36%),
+    radial-gradient(ellipse at 92% 78%, rgba(14,116,144,.20), transparent 36%),
+    linear-gradient(145deg,#070a16 0%,#10122a 48%,#16122d 100%);
+  background-attachment:fixed;color:#f8fafc;
 }
 #MainMenu, footer, header {visibility:hidden;}
-.block-container {max-width:1220px;padding-top:1.4rem;padding-bottom:3rem;}
-h1,h2,h3,h4 {font-family:'Space Grotesk',sans-serif!important;color:#fff!important;}
+.block-container {max-width:1200px;padding-top:1.2rem;padding-bottom:4rem;}
+h1,h2,h3,h4,h5 {font-family:'Space Grotesk',sans-serif!important;color:#fff!important;letter-spacing:-.2px;}
 p, label, .stMarkdown, li {color:#dce2f5;}
-[data-testid="stCaptionContainer"], [data-testid="stCaptionContainer"] * {color:#aeb8d6!important;}
-[data-testid="stSidebar"] {background:linear-gradient(180deg,#0c1022,#15132c);border-right:1px solid #ffffff15;}
+[data-testid="stCaptionContainer"], [data-testid="stCaptionContainer"] * {color:var(--muted)!important;}
+::-webkit-scrollbar {width:9px;height:9px;} ::-webkit-scrollbar-thumb {background:#3b3f6b;border-radius:9px;}
+@keyframes fadeUp {from {opacity:0;transform:translateY(8px);} to {opacity:1;transform:none;}}
+@keyframes shimmer {0% {background-position:0% 50%;} 100% {background-position:200% 50%;}}
+.character-tile,.panel,.notice,.badge,.suspect,.clue,.bubble,.resume,.chat-head {animation:fadeUp .35s ease both;}
+
+/* Sidebar */
+[data-testid="stSidebar"] {background:linear-gradient(180deg,#0b0f21,#14122b);border-right:1px solid #ffffff14;}
 [data-testid="stSidebar"] * {color:#e8eaff;}
+.logo {display:flex;align-items:center;gap:12px;padding:4px 2px 14px;}
+.logo-orb {font-size:26px;width:46px;height:46px;border-radius:14px;display:grid;place-items:center;
+  background:linear-gradient(135deg,#7c3aed,#2563eb);box-shadow:0 8px 24px rgba(99,60,230,.45);}
+.logo-t {font-family:'Space Grotesk';font-weight:800;letter-spacing:2.5px;font-size:15px;color:#fff;}
+.logo-s {font-size:11px;color:var(--muted);letter-spacing:1px;}
+.side-stats {display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:6px;}
 
 /* Hero */
-.hero {padding:32px 30px;border-radius:25px;margin-bottom:26px;
-  background:linear-gradient(110deg,rgba(124,58,237,.32),rgba(14,116,144,.18)),
-             radial-gradient(circle at 85% 20%,rgba(236,72,153,.18),transparent 35%);
-  border:1px solid rgba(196,181,253,.22);box-shadow:0 18px 55px #0003;}
+.hero {padding:34px 32px;border-radius:26px;margin-bottom:22px;position:relative;overflow:hidden;
+  background:linear-gradient(110deg,rgba(124,58,237,.34),rgba(14,116,144,.20)),
+             radial-gradient(circle at 85% 20%,rgba(236,72,153,.20),transparent 35%);
+  border:1px solid rgba(196,181,253,.25);box-shadow:0 18px 55px #0004;}
 .hero-kicker {font-size:11px;letter-spacing:3px;color:#c4b5fd;font-weight:800;}
-.hero h1 {font-size:clamp(32px,5vw,54px);line-height:1.05;margin:8px 0 10px;font-weight:800;}
-.hero p {font-size:15px;color:#d6d5f7;margin:0;max-width:720px;}
+.hero h1 {font-size:clamp(34px,5vw,58px);line-height:1.05;margin:8px 0 12px;font-weight:800;
+  background:linear-gradient(90deg,#fff,#c4b5fd,#67e8f9,#fff);background-size:200% auto;
+  -webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;animation:shimmer 7s linear infinite;}
+.hero p {font-size:15px;color:#d6d5f7;margin:0;max-width:720px;line-height:1.6;}
 .mini-hero {display:flex;align-items:center;gap:10px;margin-bottom:12px;}
 .mini-hero .t {font-family:'Space Grotesk';font-weight:800;font-size:15px;letter-spacing:3px;color:#c4b5fd;}
 
 /* Stats */
-.stat-row {display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:0 0 22px;}
-.stat {background:#ffffff0a;border:1px solid #ffffff15;border-radius:14px;padding:12px 14px;}
-.stat .n {font-size:24px;font-weight:800;color:#fff;font-family:'Space Grotesk';}
-.stat .l {font-size:10.5px;color:#aeb8d6;letter-spacing:1.5px;text-transform:uppercase;}
+.stat-row {display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:0 0 20px;}
+.stat {background:linear-gradient(145deg,#ffffff0d,#ffffff05);border:1px solid var(--line);border-radius:14px;padding:12px 14px;}
+.stat .n {font-size:24px;font-weight:800;color:#fff;font-family:'Space Grotesk';line-height:1.2;}
+.stat .l {font-size:10.5px;color:var(--muted);letter-spacing:1.5px;text-transform:uppercase;}
 
 /* Cards */
 .character-tile {background:linear-gradient(145deg,rgba(34,36,70,.95),rgba(20,25,49,.95));
-  border:1px solid rgba(167,139,250,.22);border-top:3px solid var(--accent,#8b5cf6);border-radius:20px;
-  padding:18px 18px 15px;min-height:215px;box-shadow:0 12px 30px #0002;transition:all .2s ease;}
-.character-tile:hover {border-color:var(--accent,#a78bfa);transform:translateY(-3px);box-shadow:0 16px 35px #0004;}
+  border:1px solid rgba(167,139,250,.20);border-top:3px solid var(--accent);border-radius:20px;
+  padding:18px 18px 15px;min-height:215px;box-shadow:0 12px 30px #0002;transition:all .22s ease;}
+.character-tile:hover {border-color:var(--accent);transform:translateY(-4px);box-shadow:0 18px 40px #0005;}
 .avatar {font-size:38px;margin-bottom:7px;}
 .char-name {font-family:'Space Grotesk';font-size:20px;font-weight:800;color:#fff;}
 .char-role {font-size:12px;color:#c4b5fd;margin:2px 0 9px;}
 .char-intro {font-size:13px;color:#d7dcef;line-height:1.5;min-height:55px;}
 .chip {display:inline-block;padding:3px 10px;border-radius:999px;font-size:11px;background:#ffffff12;border:1px solid #ffffff1f;color:#dbeafe;margin:8px 5px 0 0;}
-.panel {background:linear-gradient(145deg,rgba(37,39,76,.72),rgba(17,24,48,.78));
-  border:1px solid #ffffff17;border-radius:20px;padding:20px;margin:12px 0;}
+.panel {background:linear-gradient(145deg,rgba(37,39,76,.72),rgba(17,24,48,.78));border:1px solid #ffffff17;border-radius:20px;padding:20px;margin:12px 0;}
 .panel p {color:#dce2f5;}
-.small-muted {font-size:12px;color:#aeb8d6;}
+.small-muted {font-size:12px;color:var(--muted);}
 .section-kicker {font-size:11px;letter-spacing:2px;color:#a78bfa;font-weight:800;text-transform:uppercase;}
+.resume {background:linear-gradient(145deg,rgba(37,39,76,.8),rgba(17,24,48,.85));border:1px solid #ffffff17;
+  border-left:4px solid var(--accent);border-radius:16px;padding:14px 16px;margin-bottom:8px;}
+.resume .rn {font-weight:800;color:#fff;font-size:15px;} .resume .rs {color:#c3cbe6;font-size:13px;margin-top:4px;line-height:1.45;}
+
+/* Chat header */
+.chat-head {display:flex;align-items:center;gap:14px;padding:14px 16px;border-radius:20px;margin:6px 0 8px;
+  background:linear-gradient(120deg,color-mix(in srgb,var(--accent) 24%,#12152e),rgba(17,24,48,.85));border:1px solid #ffffff1a;}
+.ring {width:58px;height:58px;border-radius:50%;display:grid;place-items:center;font-size:30px;flex:none;
+  background:radial-gradient(circle,#ffffff1a,#ffffff05);
+  box-shadow:0 0 0 2px var(--accent),0 0 26px color-mix(in srgb,var(--accent) 55%,transparent);}
+.ch-main {flex:1;min-width:0;} .ch-name {font-family:'Space Grotesk';font-size:22px;font-weight:800;color:#fff;line-height:1.1;}
+.ch-role {font-size:12.5px;color:#c4b5fd;margin-top:3px;}
+.ch-bond {font-size:12px;font-weight:700;padding:6px 12px;border-radius:999px;background:#ffffff14;border:1px solid #ffffff22;color:#fff;white-space:nowrap;}
+
+/* Versus banner + level badges */
+.versus {display:flex;align-items:center;justify-content:center;gap:18px;margin:6px 0 14px;flex-wrap:wrap;}
+.vs-side {display:flex;align-items:center;gap:10px;padding:10px 18px;border-radius:999px;font-size:26px;
+  background:#ffffff0a;border:1px solid var(--accent);box-shadow:0 0 20px color-mix(in srgb,var(--accent) 35%,transparent);}
+.vs-side span {font-size:15px;font-weight:700;color:#fff;} .vs-x {font-size:22px;color:#a78bfa;font-weight:800;}
+.lvl {display:inline-block;padding:3px 11px;border-radius:999px;font-size:11px;font-weight:800;letter-spacing:1px;text-transform:uppercase;margin-right:6px;}
+.lvl.easy {background:#22c55e26;color:#86efac;border:1px solid #22c55e66;}
+.lvl.medium {background:#f59e0b26;color:#fcd34d;border:1px solid #f59e0b66;}
+.lvl.hard {background:#ef444426;color:#fca5a5;border:1px solid #ef444466;}
+.lvl.ai {background:#38bdf826;color:#7dd3fc;border:1px solid #38bdf866;}
 
 /* Notices */
-.notice {display:flex;gap:12px;align-items:flex-start;padding:14px 16px;border-radius:14px;margin:12px 0;
-  font-size:14.5px;line-height:1.55;border:1px solid;}
+.notice {display:flex;gap:12px;align-items:flex-start;padding:14px 16px;border-radius:14px;margin:12px 0;font-size:14.5px;line-height:1.55;border:1px solid;}
 .notice .ni {font-size:20px;line-height:1.2;}
 .notice.info {background:rgba(56,189,248,.13);border-color:rgba(56,189,248,.5);color:#e0f2fe;}
 .notice.success {background:rgba(34,197,94,.15);border-color:rgba(34,197,94,.55);color:#dcfce7;}
@@ -446,67 +496,88 @@ p, label, .stMarkdown, li {color:#dce2f5;}
 .notice.error {background:rgba(239,68,68,.15);border-color:rgba(239,68,68,.55);color:#fee2e2;}
 
 /* Mystery */
-.clue {display:flex;gap:12px;align-items:flex-start;background:#ffffff0a;border:1px solid #ffffff18;
-  border-left:4px solid #a78bfa;border-radius:12px;padding:12px 14px;margin:8px 0;color:#eef2ff;font-size:14.5px;}
+.clue {display:flex;gap:12px;align-items:flex-start;background:#ffffff0a;border:1px solid #ffffff18;border-left:4px solid #a78bfa;
+  border-radius:12px;padding:12px 14px;margin:8px 0;color:#eef2ff;font-size:14.5px;}
 .clue b {color:#c4b5fd;white-space:nowrap;}
-.suspect {background:#171b35;border:1px solid #ffffff1c;border-radius:14px;padding:12px 14px;margin:8px 0;color:#f1f5f9;font-size:14px;line-height:1.5;}
-.suspect .nm {font-weight:800;font-size:15px;color:#fff;}
-.suspect .ev {color:#fcd34d;font-size:13px;}
+.suspect {background:linear-gradient(145deg,#1a1e3d,#141830);border:1px solid #ffffff1c;border-radius:16px;padding:16px;margin:8px 0;
+  color:#f1f5f9;font-size:14px;line-height:1.5;min-height:190px;transition:all .2s ease;}
+.suspect:hover {border-color:#a78bfa;transform:translateY(-2px);}
+.suspect .sav {font-size:34px;} .suspect .nm {font-weight:800;font-size:16px;color:#fff;margin:2px 0 6px;}
+.suspect .st {color:#dbe2ff;font-style:italic;} .suspect .ev {color:#fcd34d;font-size:13px;margin-top:8px;}
 
 /* Dialogue bubbles + badges */
-.bubble {max-width:80%;padding:12px 15px;border-radius:16px;margin:10px 0;background:#171b35;
-  border:1px solid #ffffff1a;color:#f1f5f9;font-size:14.5px;line-height:1.55;}
+.bubble {max-width:80%;padding:12px 15px;border-radius:16px;margin:10px 0;background:#171b35;border:1px solid #ffffff1a;color:#f1f5f9;font-size:14.5px;line-height:1.55;}
 .bubble.right {margin-left:auto;background:#1e1b4b;}
 .bubble .who {font-weight:800;font-size:12px;letter-spacing:.5px;margin-bottom:3px;}
-.badge {background:linear-gradient(145deg,rgba(37,39,76,.8),rgba(17,24,48,.85));border:1px solid #a78bfa55;
-  border-radius:16px;padding:16px;text-align:center;margin-bottom:12px;min-height:150px;}
-.badge.locked {opacity:.42;filter:grayscale(1);}
+.badge {background:linear-gradient(145deg,rgba(37,39,76,.8),rgba(17,24,48,.85));border:1px solid #a78bfa55;border-radius:16px;padding:16px;text-align:center;margin-bottom:12px;min-height:150px;}
+.badge.locked {opacity:.4;filter:grayscale(1);}
 .badge .e {font-size:34px;} .badge .t {font-weight:800;color:#fff;margin-top:6px;} .badge .d {font-size:12px;color:#c3cbe6;margin-top:4px;}
 
 /* Inputs */
-.stTextInput input,.stNumberInput input,.stTextArea textarea {background:#171b35!important;color:#fff!important;
-  border:1px solid #ffffff20!important;border-radius:12px!important;}
+.stTextInput input,.stNumberInput input,.stTextArea textarea {background:#161a34!important;color:#fff!important;border:1px solid #ffffff22!important;border-radius:12px!important;}
+.stTextInput input:focus,.stTextArea textarea:focus {border-color:#8b5cf6!important;box-shadow:0 0 0 3px rgba(139,92,246,.2)!important;}
 .stTextInput input::placeholder,.stTextArea textarea::placeholder {color:#8894b8!important;}
-div[data-baseweb="select"] > div {background:#171b35!important;border:1px solid #ffffff20!important;border-radius:12px!important;}
+div[data-baseweb="select"] > div {background:#161a34!important;border:1px solid #ffffff22!important;border-radius:12px!important;}
 div[data-baseweb="select"] * {color:#f1f5f9!important;}
 div[data-baseweb="popover"] ul, div[data-baseweb="popover"] li, div[data-baseweb="menu"] {background:#1b1f3d!important;color:#f1f5f9!important;}
 div[data-baseweb="popover"] li:hover {background:#2c3170!important;}
 div[role="radiogroup"] {gap:8px;}
-div[role="radiogroup"] > label {background:#171b35;border:1px solid #ffffff22;border-radius:12px;padding:11px 14px;width:100%;transition:all .15s ease;}
+div[role="radiogroup"] > label {background:#161a34;border:1px solid #ffffff22;border-radius:12px;padding:11px 14px;width:100%;transition:all .15s ease;}
 div[role="radiogroup"] > label:hover {border-color:#a78bfa;background:#1e2347;}
 div[role="radiogroup"] > label p, div[role="radiogroup"] > label span, div[role="radiogroup"] > label div {color:#f1f5f9!important;}
 div[role="radiogroup"] > label:has(input:checked) {border-color:#a78bfa;background:rgba(124,58,237,.25);}
-.stButton button,.stFormSubmitButton button,.stDownloadButton button {border-radius:12px;min-height:42px;font-weight:700;
-  border:1px solid #ffffff20;background:linear-gradient(95deg,#7c3aed,#4f46e5);color:white!important;transition:all .15s ease;}
-.stButton button p,.stDownloadButton button p {color:white!important;}
-.stButton button:hover,.stFormSubmitButton button:hover,.stDownloadButton button:hover {border-color:#c4b5fd;
-  background:linear-gradient(95deg,#6d28d9,#4338ca);transform:translateY(-1px);}
+
+/* Buttons: primary = gradient CTA, secondary = ghost */
+.stButton button,.stDownloadButton button,.stFormSubmitButton button {border-radius:12px;min-height:42px;font-weight:700;transition:all .18s ease;}
+.stButton button p,.stDownloadButton button p,.stFormSubmitButton button p {color:inherit!important;}
+button[kind="secondary"], button[data-testid="stBaseButton-secondary"] {background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.16);color:#e8eaff!important;}
+button[kind="secondary"]:hover, button[data-testid="stBaseButton-secondary"]:hover {border-color:#a78bfa;background:rgba(139,92,246,.18);color:#fff!important;}
+button[kind="primary"], button[data-testid="stBaseButton-primary"], .stFormSubmitButton button {
+  background:linear-gradient(95deg,#7c3aed,#4f46e5);border:1px solid #ffffff26;color:#fff!important;box-shadow:0 6px 18px rgba(99,60,230,.35);}
+button[kind="primary"]:hover, button[data-testid="stBaseButton-primary"]:hover, .stFormSubmitButton button:hover {
+  background:linear-gradient(95deg,#8b5cf6,#6366f1);transform:translateY(-1px);box-shadow:0 10px 24px rgba(99,60,230,.45);}
+button:disabled {opacity:.4!important;transform:none!important;}
+button:focus-visible {outline:2px solid #a78bfa!important;outline-offset:2px;}
+
+/* Pills / segmented nav */
+[data-testid="stButtonGroup"] {gap:6px;}
+[data-testid="stButtonGroup"] button {background:#161a34!important;border:1px solid #ffffff22!important;color:#dfe5ff!important;border-radius:999px!important;font-weight:600;}
+[data-testid="stButtonGroup"] button p {color:inherit!important;}
+[data-testid="stButtonGroup"] button:hover {border-color:#a78bfa!important;}
+[data-testid="stButtonGroup"] button[data-testid$="Active"] {background:linear-gradient(95deg,#7c3aed,#4f46e5)!important;border-color:#c4b5fd!important;color:#fff!important;}
+[data-testid="stSegmentedControl"], [data-testid="stSegmentedControl"] > div {overflow-x:auto;}
+
 button[data-baseweb="tab"] p {color:#c7d0ea!important;font-weight:600;}
 button[data-baseweb="tab"][aria-selected="true"] p {color:#fff!important;}
 
 /* Chat */
-[data-testid="stChatMessage"] {background:#171b35cc;border:1px solid #ffffff14;border-radius:16px;}
-[data-testid="stChatMessage"] p, [data-testid="stChatMessage"] li {color:#f1f5f9;}
+[data-testid="stChatMessage"] {background:rgba(23,27,53,.82);border:1px solid var(--line);border-radius:18px;padding:.85rem 1rem;animation:fadeUp .3s ease both;}
+[data-testid="stChatMessage"]:has([data-testid="stChatMessageAvatarUser"]) {
+  background:linear-gradient(135deg,rgba(91,53,213,.45),rgba(56,76,230,.34));border-color:rgba(167,139,250,.38);
+  flex-direction:row-reverse;width:fit-content;max-width:88%;margin-left:auto;}
+[data-testid="stChatMessage"] p, [data-testid="stChatMessage"] li {color:#f1f5f9;line-height:1.6;}
 [data-testid="stChatInput"] {background:transparent!important;}
 [data-testid="stChatInput"] > div, [data-testid="stChatInput"] form, [data-testid="stChatInput"] textarea,
 [data-testid="stChatInput"] textarea[data-testid="stChatInputTextArea"] {background:#f8fafc!important;color:#111827!important;
-  -webkit-text-fill-color:#111827!important;caret-color:#111827!important;border:1px solid #cbd5e1!important;border-radius:14px!important;}
+  -webkit-text-fill-color:#111827!important;caret-color:#111827!important;border:1px solid #cbd5e1!important;border-radius:16px!important;}
 [data-testid="stChatInput"] textarea::placeholder {color:#64748b!important;-webkit-text-fill-color:#64748b!important;opacity:1!important;}
-[data-testid="stChatInput"] textarea:focus {border:1px solid #8b5cf6!important;box-shadow:0 0 0 3px rgba(139,92,246,.18)!important;}
+[data-testid="stChatInput"] textarea:focus {border:1px solid #8b5cf6!important;box-shadow:0 0 0 3px rgba(139,92,246,.2)!important;}
 [data-testid="stChatInput"] button {color:#4f46e5!important;}
 [data-testid="stChatInput"] button svg {fill:#4f46e5!important;}
 
-[data-testid="stExpander"] {background:#171b35aa;border:1px solid #ffffff1a!important;border-radius:14px;}
+[data-testid="stExpander"] {background:#161a34aa;border:1px solid #ffffff1a!important;border-radius:14px;}
 [data-testid="stExpander"] summary, [data-testid="stExpander"] summary * {color:#f1f5f9!important;}
 [data-testid="stVerticalBlockBorderWrapper"] {border-color:#ffffff1c!important;border-radius:16px;}
 div[data-testid="stForm"] {background:#ffffff06;padding:18px;border:1px solid #ffffff14;border-radius:18px;}
-[data-testid="stMetricValue"] {color:#fff!important;}
-hr {border-color:#ffffff20;}
+hr {border-color:#ffffff1c;}
 .stProgress > div > div > div > div {background:linear-gradient(90deg,#8b5cf6,#22d3ee);}
+.stProgress > div > div {background:#ffffff14;}
 
 @media (max-width:760px) {
+  .block-container {padding-left:.9rem;padding-right:.9rem;}
   .hero {padding:22px 18px;} .hero h1 {font-size:30px;}
   .stat-row {grid-template-columns:repeat(2,1fr);} .bubble {max-width:94%;}
+  .chat-head {padding:12px;} .ch-bond {display:none;} .vs-side {padding:8px 12px;font-size:22px;}
 }
 </style>
 """, unsafe_allow_html=True)
@@ -724,8 +795,9 @@ def remove_case(case_id):
 # ---------- Sidebar ----------
 NAV_ICONS = {"Discover": "🪐", "Chat": "💬", "Crossover": "🎬", "Create": "🧪",
              "My Characters": "📚", "Mystery Room": "🔐", "Achievements": "🏆"}
-st.sidebar.markdown("# 🌌 THE UNKNOWN")
-st.sidebar.caption("A universe full of unusual characters.")
+st.sidebar.markdown(
+    '<div class="logo"><div class="logo-orb">🌌</div><div><div class="logo-t">THE UNKNOWN</div>'
+    '<div class="logo-s">CHARACTER UNIVERSE</div></div></div>', unsafe_allow_html=True)
 st.sidebar.radio("Explore", list(NAV_ICONS.keys()), key="navigation", label_visibility="collapsed",
                  format_func=lambda p: f"{NAV_ICONS[p]}  {p}")
 st.sidebar.markdown("---")
@@ -734,8 +806,10 @@ st.sidebar.selectbox("🌐 Reply language", list(LANGUAGES.keys()), key="reply_l
 if LANGUAGES.get(st.session_state.reply_language):
     st.session_state.used_language = True
 st.sidebar.markdown("---")
-st.sidebar.metric("Conversations", total_chats())
-st.sidebar.metric("Achievements", f"{len(st.session_state.achievements)}/{len(ACHIEVEMENTS)}")
+st.sidebar.markdown(
+    f'<div class="side-stats"><div class="stat"><div class="n">{total_chats()}</div><div class="l">Chats</div></div>'
+    f'<div class="stat"><div class="n">{len(st.session_state.achievements)}/{len(ACHIEVEMENTS)}</div><div class="l">Badges</div></div></div>',
+    unsafe_allow_html=True)
 with st.sidebar.expander("💾 Save / Load progress"):
     st.caption("Progress lives only in this session. Download it to keep your characters and chats.")
     st.download_button("⬇️ Download save file", export_state(), file_name="the_unknown_save.json",
@@ -750,6 +824,10 @@ with st.sidebar.expander("💾 Save / Load progress"):
             st.error("That file couldn't be loaded.")
 
 nav = st.session_state.navigation
+if hasattr(st, "segmented_control"):
+    st.session_state.top_nav = nav
+    st.segmented_control("Navigate", list(NAV_ICONS.keys()), selection_mode="single", key="top_nav",
+                         format_func=lambda p: f"{NAV_ICONS[p]} {p}", label_visibility="collapsed", on_change=sync_nav)
 
 # ---------- Header ----------
 if nav == "Discover":
@@ -761,7 +839,7 @@ if nav == "Discover":
       and create someone entirely your own. Talk in any language — they answer in yours.</p>
     </div>
     """, unsafe_allow_html=True)
-else:
+elif not hasattr(st, "segmented_control"):
     st.markdown('<div class="mini-hero"><span style="font-size:22px">🌌</span><span class="t">THE UNKNOWN</span></div>',
                 unsafe_allow_html=True)
 
@@ -778,6 +856,26 @@ if nav == "Discover":
     </div>
     """, unsafe_allow_html=True)
 
+    with st.expander("✨ New here? 30-second guide"):
+        st.markdown(
+            "**1. Meet** a character and just start typing — in any language.  \n"
+            "**2. Bond** with them: the more you talk, the closer you get to their secret.  \n"
+            "**3. Create** your own character, stage a **Crossover**, or crack a **Mystery** (the AI writes new cases).  \n"
+            "**4. Save** your progress from the sidebar so nothing is lost.")
+
+    recent = [cid for cid in st.session_state.recent if get_character(cid) and st.session_state.chat_histories.get(cid)][:3]
+    if recent:
+        st.markdown("### ⏱️ Continue where you left off")
+        for col, cid in zip(st.columns(len(recent)), recent):
+            rc = get_character(cid)
+            last = st.session_state.chat_histories[cid][-1]["content"].replace("\n", " ")
+            snippet = last[:80] + ("…" if len(last) > 80 else "")
+            with col:
+                st.markdown(f'<div class="resume" style="--accent:{safe_color(rc.get("color"))}">'
+                            f'<div class="rn">{esc(rc["emoji"])} {esc(rc["name"])}</div>'
+                            f'<div class="rs">{esc(snippet)}</div></div>', unsafe_allow_html=True)
+                st.button("Resume →", key=f"resume_{cid}", use_container_width=True, on_click=go_to_chat, args=(cid,))
+
     if st.session_state.daily_id is None or get_character(st.session_state.daily_id) is None:
         st.session_state.daily_id = random.choice(PRESET_CHARACTERS)["id"]
     daily = get_character(st.session_state.daily_id)
@@ -790,7 +888,7 @@ if nav == "Discover":
     </div>
     """, unsafe_allow_html=True)
     b1, b2 = st.columns([3, 1])
-    b1.button(f"Meet {daily['name']}  →", key="daily_meet", use_container_width=True, on_click=go_to_chat, args=(daily["id"],))
+    b1.button(f"Meet {daily['name']}  →", key="daily_meet", type="primary", use_container_width=True, on_click=go_to_chat, args=(daily["id"],))
     b2.button("🎲 Surprise me", key="surprise", use_container_width=True, on_click=surprise_me)
 
     st.markdown("## 🪐 Choose who to meet")
@@ -826,7 +924,7 @@ if nav == "Discover":
             </div>
             """, unsafe_allow_html=True)
             m1, m2 = st.columns([4, 1])
-            m1.button(f"💬 Meet {c['name']}", key=f"meet_{c['id']}", use_container_width=True, on_click=go_to_chat, args=(c["id"],))
+            m1.button(f"💬 Meet {c['name']}", key=f"meet_{c['id']}", type="primary", use_container_width=True, on_click=go_to_chat, args=(c["id"],))
             m2.button("❤️" if c["id"] in st.session_state.favorites else "🤍", key=f"fav_{c['id']}",
                       use_container_width=True, on_click=toggle_fav, args=(c["id"],))
 
@@ -870,20 +968,27 @@ elif nav == "Chat":
     history = ensure_history(chosen_id)
     color = safe_color(character.get("color"))
 
+    n_ex = len(history) // 2
+    (_, b_name, b_emoji), b_next, b_progress = bond_level(n_ex)
     st.markdown(f"""
-    <div class="panel" style="border-left:4px solid {color}">
-      <div style="display:flex;gap:16px;align-items:center">
-        <div style="font-size:48px">{esc(character['emoji'])}</div>
-        <div>
-          <div style="font-size:23px;font-weight:800;color:white">{esc(character['name'])}</div>
-          <div style="color:#c4b5fd;font-size:13px">{esc(character['role'])} · {esc(character['genre'])}</div>
-          <div class="small-muted">{esc(character.get('vibe', character.get('personality', '')))}</div>
-        </div>
+    <div class="chat-head" style="--accent:{color}">
+      <div class="ring">{esc(character['emoji'])}</div>
+      <div class="ch-main">
+        <div class="ch-name">{esc(character['name'])}</div>
+        <div class="ch-role">{esc(character['role'])} · {esc(character['genre'])}</div>
       </div>
-      <p style="margin:12px 0 0">{esc(character['intro'])}</p>
+      <div class="ch-bond">{b_emoji} {b_name}</div>
     </div>
     """, unsafe_allow_html=True)
-    mood = st.selectbox("Conversation vibe", MOODS, key=f"mood_{chosen_id}")
+    st.progress(min(b_progress, 1.0))
+    st.markdown(f'<div class="small-muted" style="margin:-6px 0 8px">'
+                f'{f"{b_next - n_ex} more exchange(s) to the next bond level" if b_next else "Max bond reached ✨"}</div>',
+                unsafe_allow_html=True)
+    with st.expander(f"About {character['name']}"):
+        st.markdown(esc(character['intro']))
+        st.markdown(f'<span class="chip">{esc(character.get("vibe", character.get("personality", "")))}</span>', unsafe_allow_html=True)
+    st.markdown('<div class="small-muted" style="margin:6px 0 2px">Conversation vibe</div>', unsafe_allow_html=True)
+    mood = mood_picker(f"mood_{chosen_id}")
 
     typed_message = st.chat_input(f"Message {character['name']}...")
     message_to_send = None
@@ -912,6 +1017,10 @@ elif nav == "Chat":
                 history.append({"role": "assistant", "content": str(reply).strip()})
                 if chosen_id not in st.session_state.visited_characters:
                     st.session_state.visited_characters.append(chosen_id)
+                rec = st.session_state.recent
+                if chosen_id in rec:
+                    rec.remove(chosen_id)
+                rec.insert(0, chosen_id)
                 ok = True
             except Exception as error:
                 show_error(error)
@@ -925,10 +1034,6 @@ elif nav == "Chat":
             pcols[i % 2].button(prompt, key=f"prompt_{chosen_id}_{i}", use_container_width=True, on_click=set_pending, args=(prompt,))
     else:
         count = len(history) // 2
-        (_, bond_name, bond_emoji), nxt, progress = bond_level(count)
-        st.markdown(f'<div class="small-muted" style="margin-top:12px">{bond_emoji} Bond: <b>{bond_name}</b>'
-                    f'{f" · next level at {nxt} exchanges" if nxt else " · max level"}</div>', unsafe_allow_html=True)
-        st.progress(min(progress, 1.0))
         if count >= 4:
             notice("success", "You've spent enough time together. Ask directly — the secret may be ready to slip out!")
         elif count >= 3:
@@ -959,6 +1064,12 @@ elif nav == "Crossover":
     t1, t2 = st.columns([3, 1])
     topic = t1.text_input("Topic", key="scene_topic", placeholder="e.g. A stolen umbrella, the best pizza topping, a haunted bus...")
     tone = t2.selectbox("Tone", ["Funny", "Dramatic", "Mysterious", "Wholesome"], key="cross_tone")
+    _A, _B = get_character(a_id), get_character(b_id)
+    st.markdown(
+        f'<div class="versus"><div class="vs-side" style="--accent:{safe_color(_A.get("color"))}">{esc(_A["emoji"])}<span>{esc(_A["name"])}</span></div>'
+        f'<div class="vs-x">×</div>'
+        f'<div class="vs-side" style="--accent:{safe_color(_B.get("color"))}">{esc(_B["emoji"])}<span>{esc(_B["name"])}</span></div></div>',
+        unsafe_allow_html=True)
 
     def run_scene(cont=False):
         A, B = get_character(a_id), get_character(b_id)
@@ -993,7 +1104,7 @@ Each line is 1-2 sentences. Stay in character, keep it family-friendly, and don'
         notice("warning", "Pick two different characters for a crossover.")
     else:
         g1, g2 = st.columns(2)
-        gen = g1.button("🎬 Action! Write the scene", use_container_width=True, key="gen_scene")
+        gen = g1.button("🎬 Action! Write the scene", type="primary", use_container_width=True, key="gen_scene")
         cont = g2.button("➕ Continue scene", use_container_width=True, key="cont_scene",
                          disabled=not st.session_state.scene)
         if gen or cont:
@@ -1025,7 +1136,8 @@ elif nav == "Create":
     st.caption("Give your character a few ingredients. The AI writes the profile, secret, opening line and conversation starters. "
                "Write in any language — the character will use it.")
     st.button("🎲 Give me a random idea", on_click=randomize_idea)
-    with st.form("create_character_form"):
+    form_col, prev_col = st.columns([3, 2], gap="large")
+    with form_col:
         c1, c2 = st.columns(2)
         with c1:
             name = st.text_input("Character name", key="cc_name", placeholder="e.g. Nova Starling")
@@ -1040,7 +1152,20 @@ elif nav == "Create":
             color_pick = e2.color_picker("Theme colour", key="cc_color")
         concept = st.text_area("A little extra detail (optional)", key="cc_concept", height=90,
                                placeholder="A secret, a funny habit, a strange goal...")
-        submitted = st.form_submit_button("✨ Bring this character to life", use_container_width=True)
+        submitted = st.button("✨ Bring this character to life", type="primary", use_container_width=True, key="cc_submit")
+    with prev_col:
+        st.markdown("##### 👀 Live preview")
+        st.markdown(f"""
+        <div class="character-tile" style="--accent:{safe_color(color_pick)}">
+          <div class="avatar">{esc(emoji)}</div>
+          <div class="char-name">{esc(name.strip() or 'Your character')}</div>
+          <div class="char-role">{esc(role.strip() or 'Their role')}</div>
+          <div class="char-intro">{esc(concept.strip() or 'A few words about them will appear here.')}</div>
+          <span class="chip">{esc(genre)}</span>
+          <div class="small-muted" style="margin-top:9px">{esc(personality.strip() or 'Personality')}</div>
+        </div>
+        """, unsafe_allow_html=True)
+        st.caption("The AI will add a full profile, a secret, an opening line and conversation starters.")
 
     if submitted:
         if not all([name.strip(), role.strip(), personality.strip(), ability.strip()]):
@@ -1088,7 +1213,7 @@ Do not change the supplied name or ability. Keep JSON keys in English; the text 
                 with st.container(border=True):
                     st.markdown(f"### {emoji} {new_character['name']}")
                     st.markdown(new_character["profile"])
-                st.button("💬 Chat with your new character", key="new_character_chat",
+                st.button("💬 Chat with your new character", key="new_character_chat", type="primary",
                           on_click=go_to_chat, args=(new_character["id"],))
             except Exception as error:
                 show_error(error)
@@ -1109,7 +1234,7 @@ elif nav == "My Characters":
                 st.markdown(character.get("profile", character["intro"]))
                 st.markdown(f'<span class="chip">🔒 Secret: {esc(character["secret"])}</span>', unsafe_allow_html=True)
                 a, b, c = st.columns(3)
-                a.button("💬 Chat", key=f"custom_chat_{cid}", use_container_width=True, on_click=go_to_chat, args=(cid,))
+                a.button("💬 Chat", key=f"custom_chat_{cid}", type="primary", use_container_width=True, on_click=go_to_chat, args=(cid,))
                 b.button("❤️ Unfavourite" if cid in st.session_state.favorites else "🤍 Favourite", key=f"cfav_{cid}",
                          use_container_width=True, on_click=toggle_fav, args=(cid,))
                 if c.button("🗑️ Delete", key=f"custom_delete_{cid}", use_container_width=True):
@@ -1151,7 +1276,7 @@ elif nav == "Mystery Room":
         gen_theme = g2.text_input("Theme (optional)", key="gen_theme",
                                   placeholder="haunted school, space station, wedding... (blank = random)")
         use_universe = g3.checkbox("Use universe characters", value=True, key="gen_universe")
-        if st.button("✨ Generate a new case", use_container_width=True, key="gen_case_btn"):
+        if st.button("✨ Generate a new case", type="primary", use_container_width=True, key="gen_case_btn"):
             try:
                 with st.spinner("The detective agency is writing a new case..."):
                     new_case = generate_case(gen_level, gen_theme, use_universe)
@@ -1185,14 +1310,18 @@ elif nav == "Mystery Room":
         clues = "".join(f'<div class="clue"><b>🔎 Clue {i + 1}</b><span>{esc(t)}</span></div>' for i, t in enumerate(case["clues"]))
         st.markdown(f"""
         <div class="panel">
-          <div class="section-kicker">CASE · {esc(case['level'])}</div>
+          <div><span class="lvl {esc(case['level']).lower()}">{esc(case['level'])}</span>{'<span class="lvl ai">AI case</span>' if case.get('ai') else ''}</div>
           <div style="font-size:26px;font-weight:800;color:white;margin:4px 0 8px">{case['emoji']} {esc(case['title'])}</div>
           <p style="margin:0 0 10px">{esc(case['story'])}</p>{clues}
         </div>""", unsafe_allow_html=True)
         st.markdown("### 🕵️ Suspects")
-        for nm, s in case["suspects"].items():
-            st.markdown(f'<div class="suspect"><div class="nm">{s["emoji"]} {esc(nm)}</div>{esc(s["statement"])}'
-                        f'<div class="ev">👁️ {esc(s["evidence"])}</div></div>', unsafe_allow_html=True)
+        per_row = 3 if len(case["suspects"]) == 3 else 2
+        scols = st.columns(per_row)
+        for i, (nm, s) in enumerate(case["suspects"].items()):
+            scols[i % per_row].markdown(
+                f'<div class="suspect"><div class="sav">{esc(s["emoji"])}</div><div class="nm">{esc(nm)}</div>'
+                f'<div class="st">{esc(s["statement"])}</div><div class="ev">👁️ {esc(s["evidence"])}</div></div>',
+                unsafe_allow_html=True)
 
     with tab_ask:
         who = st.selectbox("Who do you want to question?", names, key=f"who_{case_id}",
@@ -1244,7 +1373,7 @@ elif nav == "Mystery Room":
                          format_func=lambda n: f"{case['suspects'][n]['emoji']} {n}  —  {case['suspects'][n]['statement']}")
         if attempts:
             st.markdown(f'<div class="small-muted">Attempts so far: {attempts}</div>', unsafe_allow_html=True)
-        if st.button("⚖️ Submit accusation", use_container_width=True, key=f"acc_{case_id}"):
+        if st.button("⚖️ Submit accusation", type="primary", use_container_width=True, key=f"acc_{case_id}"):
             if not guess:
                 notice("warning", "Choose a suspect first.")
             else:
