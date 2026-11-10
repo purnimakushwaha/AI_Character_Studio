@@ -583,44 +583,135 @@ hr {border-color:#ffffff1c;}
 """, unsafe_allow_html=True)
 
 
-# ---------- Ollama Cloud ----------
-def get_model():
-    return str(st.secrets.get("OLLAMA_MODEL", "gemma4:31b")).strip() or "gemma4:31b"
+# ---------- AI providers: Ollama Cloud / Ollama local / Groq / Gemini (with automatic fallback) ----------
+PROVIDERS = {
+    "ollama": {"label": "Ollama Cloud", "key": "OLLAMA_API_KEY", "model": "OLLAMA_MODEL", "default_model": "gemma4:31b"},
+    "ollama_local": {"label": "Ollama (local)", "key": None, "model": "OLLAMA_LOCAL_MODEL", "default_model": "llama3.2"},
+    "groq": {"label": "Groq", "key": "GROQ_API_KEY", "model": "GROQ_MODEL", "default_model": "openai/gpt-oss-120b",
+             "base_url": "https://api.groq.com/openai/v1"},
+    "gemini": {"label": "Google Gemini", "key": "GEMINI_API_KEY", "model": "GEMINI_MODEL", "default_model": "gemini-2.5-flash",
+               "base_url": "https://generativelanguage.googleapis.com/v1beta/openai/"},
+}
 
 
-def make_client():
-    api_key = st.secrets.get("OLLAMA_API_KEY", "")
-    if not api_key:
-        raise ValueError("OLLAMA_API_KEY is missing in Streamlit Secrets.")
-    return Client(host="https://ollama.com", headers={"Authorization": f"Bearer {api_key}"})
+def _secret(name, default=""):
+    try:
+        return str(st.secrets.get(name, default)).strip()
+    except Exception:
+        return default
+
+
+def provider_chain():
+    """Primary provider first, then any FALLBACK_PROVIDERS. Providers without a key are skipped."""
+    order = [_secret("PROVIDER", "ollama")] + [x.strip() for x in _secret("FALLBACK_PROVIDERS").split(",") if x.strip()]
+    chain = []
+    for name in order:
+        cfg = PROVIDERS.get(name)
+        if not cfg or name in chain:
+            continue
+        if cfg["key"] and not _secret(cfg["key"]):
+            continue
+        chain.append(name)
+    return chain
+
+
+def provider_model(name):
+    cfg = PROVIDERS[name]
+    return _secret(cfg["model"]) or cfg["default_model"]
+
+
+def provider_label():
+    chain = provider_chain()
+    if not chain:
+        return None
+    extra = f" (+{len(chain) - 1} backup)" if len(chain) > 1 else ""
+    return f"{PROVIDERS[chain[0]]['label']} · {provider_model(chain[0])}{extra}"
+
+
+def _client(name):
+    cfg = PROVIDERS[name]
+    if name == "ollama":
+        return Client(host="https://ollama.com", headers={"Authorization": f"Bearer {_secret('OLLAMA_API_KEY')}"})
+    if name == "ollama_local":
+        return Client(host=_secret("OLLAMA_HOST", "http://localhost:11434"))
+    from openai import OpenAI
+    return OpenAI(api_key=_secret(cfg["key"]), base_url=cfg["base_url"], timeout=60)
+
+
+def _complete(name, messages):
+    model = provider_model(name)
+    client = _client(name)
+    if name.startswith("ollama"):
+        return client.chat(model=model, messages=messages, stream=False).message.content or ""
+    return client.chat.completions.create(model=model, messages=messages).choices[0].message.content or ""
+
+
+def _stream(name, messages):
+    model = provider_model(name)
+    client = _client(name)
+    if name.startswith("ollama"):
+        for chunk in client.chat(model=model, messages=messages, stream=True):
+            piece = chunk.message.content
+            if piece:
+                yield piece
+    else:
+        for chunk in client.chat.completions.create(model=model, messages=messages, stream=True):
+            if chunk.choices and chunk.choices[0].delta.content:
+                yield chunk.choices[0].delta.content
+
+
+NO_PROVIDER = "No AI provider configured (api_key missing)."
 
 
 def get_ai_response(messages):
-    response = make_client().chat(model=get_model(), messages=messages, stream=False)
-    return response.message.content.strip()
+    chain = provider_chain()
+    if not chain:
+        raise ValueError(NO_PROVIDER)
+    first_error = None
+    for name in chain:
+        try:
+            return _complete(name, messages).strip()
+        except Exception as error:
+            first_error = first_error or error
+    raise first_error
 
 
 def stream_ai_response(messages):
-    for chunk in make_client().chat(model=get_model(), messages=messages, stream=True):
-        piece = chunk.message.content
-        if piece:
-            yield piece
+    chain = provider_chain()
+    if not chain:
+        raise ValueError(NO_PROVIDER)
+    first_error = None
+    for name in chain:
+        started = False
+        try:
+            for piece in _stream(name, messages):
+                started = True
+                yield piece
+            return
+        except Exception as error:
+            if started:
+                raise
+            first_error = first_error or error
+    raise first_error
 
 
 def show_error(error):
     msg = str(error).lower()
     if "401" in msg or "unauthorized" in msg:
-        notice("error", "Ollama authentication failed. Check the API key in Streamlit Secrets.")
+        notice("error", "AI authentication failed. Check your API key in Streamlit Secrets.")
     elif "403" in msg or "forbidden" in msg:
-        notice("error", "Ollama denied access. Check your account and model access.")
+        notice("error", "The AI provider denied access. Check your account and model access.")
     elif "404" in msg or "not found" in msg:
-        notice("error", "The configured Ollama model was not found. Check OLLAMA_MODEL.")
+        notice("error", "The AI model was not found. Check the *_MODEL value in Secrets (model names change over time).")
+    elif "402" in msg or "payment" in msg or "credits" in msg or "quota" in msg:
+        notice("error", "Your AI provider's free usage is finished (402). Add a free backup like Groq or Gemini in Secrets "
+                        "(see FALLBACK_PROVIDERS), or add credits.")
     elif "429" in msg or "rate limit" in msg:
-        notice("error", "Ollama usage limit reached. Please try again later.")
+        notice("error", "Rate limit reached. Please wait a minute and try again.")
     elif "timeout" in msg or "connection" in msg:
-        notice("error", "Could not connect to Ollama Cloud. Please try again.")
+        notice("error", "Could not connect to the AI service. Please try again.")
     elif "api_key" in msg or "missing" in msg:
-        notice("error", "Add OLLAMA_API_KEY in Streamlit Cloud → Settings → Secrets.")
+        notice("error", "Add an AI key (GROQ_API_KEY, GEMINI_API_KEY or OLLAMA_API_KEY) in Streamlit Cloud → Settings → Secrets.")
     else:
         notice("error", "Something went wrong while contacting the AI service.")
         with st.expander("Technical details"):
@@ -805,6 +896,8 @@ st.sidebar.selectbox("🌐 Reply language", list(LANGUAGES.keys()), key="reply_l
                      help="Auto: characters reply in the language you write in. Or force one language.")
 if LANGUAGES.get(st.session_state.reply_language):
     st.session_state.used_language = True
+_engine = provider_label()
+st.sidebar.caption(f"🤖 AI engine: {_engine}" if _engine else "⚠️ No AI key found. Add one in Secrets.")
 st.sidebar.markdown("---")
 st.sidebar.markdown(
     f'<div class="side-stats"><div class="stat"><div class="n">{total_chats()}</div><div class="l">Chats</div></div>'
@@ -1409,6 +1502,6 @@ st.markdown("---")
 st.markdown(
     "<div style='text-align:center;color:#8994b7;font-size:12px'>"
     "🌌 THE UNKNOWN · Meet characters. Discover secrets. Make a little chaos. "
-    "<br>Powered by Ollama Cloud & Streamlit</div>",
+    "<br>Powered by AI & Streamlit</div>",
     unsafe_allow_html=True,
 )
